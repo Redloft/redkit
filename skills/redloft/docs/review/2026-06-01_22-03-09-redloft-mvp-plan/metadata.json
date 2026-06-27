@@ -1,0 +1,40 @@
+{
+  "run_id": "462c49c2-a9e8-4b0d-977c-7b260202fabe",
+  "timestamp": "2026-06-01_22-03-09",
+  "mode": "auto",
+  "project_slug": "redloft",
+  "project_dir": "/Users/igorkonovalcik/.claude/skills/redloft/docs/review/2026-06-01_22-03-09-redloft-mvp-plan",
+  "central_dir": "/Users/igorkonovalcik/.claude/skills/redloft/docs/review/2026-06-01_22-03-09-redloft-mvp-plan",
+  "cwd": "/Users/igorkonovalcik/.claude/skills/redloft",
+  "selected_roles": [
+    "scoper",
+    "architect",
+    "security",
+    "backend",
+    "qa",
+    "judge"
+  ],
+  "skipped_roles_not_implemented": [],
+  "failed_role_count": 0,
+  "review_status": [
+    {
+      "role": "architect",
+      "status": "completed"
+    },
+    {
+      "role": "security",
+      "status": "completed"
+    },
+    {
+      "role": "backend",
+      "status": "completed"
+    },
+    {
+      "role": "qa",
+      "status": "completed"
+    }
+  ],
+  "cross_model_used": false,
+  "verdict": "NEEDS-WORK",
+  "confidence": 0.86
+}

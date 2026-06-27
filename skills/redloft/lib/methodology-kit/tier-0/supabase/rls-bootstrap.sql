@@ -1,0 +1,42 @@
+-- rls-bootstrap.sql — {{PROJECT_NAME}}
+-- RLS deny-by-default + per-table policy scaffold (redloft methodology kit, DR-7).
+-- RU: применить ДО первого деплоя. Открытая БД без RLS = утечка данных.
+-- EN: Apply BEFORE first deploy. A table without RLS is world-readable via the API.
+--
+-- HOW TO USE / КАК ПРИМЕНИТЬ:
+--   1. Для КАЖДОЙ таблицы с пользовательскими данными — раскомментируй блок ниже и подставь имя.
+--   2. Прогони в Supabase SQL editor (или через миграцию `supabase migration new`).
+--   3. Проверь в Supabase → Auth → Policies, что у таблицы есть политики и RLS = ON.
+
+-- ── 1. Deny-by-default: включить RLS на таблице ───────────────────────────────
+-- После ENABLE и БЕЗ политик таблица недоступна никому (кроме service_role). Это и есть deny-by-default.
+--
+-- ALTER TABLE public.<table> ENABLE ROW LEVEL SECURITY;
+
+-- ── 2. Явные политики (добавляй только то, что реально нужно) ─────────────────
+-- Пример: владелец видит/правит только свои строки (колонка user_id = auth.uid()).
+--
+-- CREATE POLICY "<table>_select_own" ON public.<table>
+--   FOR SELECT TO authenticated
+--   USING (auth.uid() = user_id);
+--
+-- CREATE POLICY "<table>_insert_own" ON public.<table>
+--   FOR INSERT TO authenticated
+--   WITH CHECK (auth.uid() = user_id);
+--
+-- CREATE POLICY "<table>_update_own" ON public.<table>
+--   FOR UPDATE TO authenticated
+--   USING (auth.uid() = user_id)
+--   WITH CHECK (auth.uid() = user_id);
+
+-- ── 3. Публичное чтение (например, контент лендинга) — ТОЛЬКО где осознанно ────
+-- CREATE POLICY "<table>_public_read" ON public.<table>
+--   FOR SELECT TO anon, authenticated
+--   USING (true);
+
+-- ── 4. Самопроверка: таблицы без RLS (должно быть пусто перед деплоем) ────────
+-- SELECT tablename FROM pg_tables t
+--   WHERE schemaname = 'public'
+--     AND NOT EXISTS (
+--       SELECT 1 FROM pg_class c
+--       WHERE c.relname = t.tablename AND c.relrowsecurity = true);

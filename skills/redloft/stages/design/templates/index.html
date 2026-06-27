@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прототип — главная</title>
+<script>/* FOUC-fix: тема ДО first paint */ var NS='proto:'; (function(){var s=localStorage.getItem(NS+'theme'); if(s) document.documentElement.setAttribute('data-theme', s);})();</script>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Страница СОБИРАЕТСЯ из KIT (см. components.html). Здесь — только композиция секций.
+     Новые цвета/радиусы/тени НЕ вводить — только var(--…) из tokens.css. */
+  .wrap { max-width: var(--container); margin:0 auto; padding:0 var(--space-5); }
+  header.site { position:sticky; top:0; z-index:40; backdrop-filter:saturate(1.2) blur(8px);
+    background: color-mix(in srgb, var(--color-bg) 80%, transparent); border-bottom:1px solid var(--color-border); }
+  .bar { display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); padding:var(--space-3) 0; }
+  nav a { text-decoration:none; margin-right:var(--space-4); }
+  nav a:hover { color:var(--color-accent); }
+  .btn { display:inline-flex; align-items:center; justify-content:center; border:1px solid transparent; border-radius:var(--radius-md);
+    min-height:44px; padding:var(--space-2) var(--space-4); font-weight:var(--weight-medium); cursor:pointer;  /* tap-target ≥44px */
+    background:var(--color-accent); color:var(--color-accent-fg); transition:background var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out); text-decoration:none; }
+  .btn:active { transform:scale(.97); }
+  .hero { padding: var(--space-16) 0 var(--space-12); }
+  .hero h1 { font-size: var(--text-4xl); margin:0 0 var(--space-4); max-width:14ch; }
+  .hero p { font-size: var(--text-lg); color:var(--color-text-muted); max-width:52ch; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:var(--space-5); padding:var(--space-8) 0; }
+  .card { background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-lg);
+    padding:var(--space-5); box-shadow:var(--shadow-sm); transition:transform var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out); }
+  .card:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); }
+  section { scroll-margin-top:72px; }
+  footer.site { border-top:1px solid var(--color-border); color:var(--color-text-muted); padding:var(--space-8) 0; margin-top:var(--space-12); }
+  /* мобильный брейкпоинт: hero мельче, nav переносится и скроллится (responsive, не anti-pattern;
+     полноценный burger — в KIT .c-nav 'open', см. components.html/component-contracts.md) */
+  @media (max-width: 640px) {
+    .hero { padding: var(--space-8) 0 var(--space-6); }
+    .hero h1 { font-size: var(--text-2xl); max-width: none; }
+    .hero p { font-size: var(--text-base); }
+    .bar { flex-wrap: wrap; gap: var(--space-2); }
+    nav { order: 3; width: 100%; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+  }
+</style>
+</head>
+<body>
+<header class="site"><div class="wrap bar">
+  <strong>Лого</strong>
+  <nav><a href="#services">Услуги</a><a href="#about">О нас</a><a href="#contact">Контакты</a></nav>
+  <a class="btn" href="#contact">Оставить заявку</a>
+</div></header>
+
+<main>
+  <section class="hero wrap" data-reveal>
+    <h1>Заголовок-оффер из content-стадии</h1>
+    <p>Подзаголовок раскрывает оффер: что это, для кого и почему именно вы. CTA — главный из planning.</p>
+    <p style="margin-top:var(--space-5)"><a class="btn" href="#contact">Главный CTA</a></p>
+  </section>
+
+  <section id="services" class="wrap" data-reveal>
+    <h2>Услуги</h2>
+    <div class="grid">
+      <article class="card"><h3>Услуга 1</h3><p style="color:var(--color-text-muted)">Описание.</p></article>
+      <article class="card"><h3>Услуга 2</h3><p style="color:var(--color-text-muted)">Описание.</p></article>
+      <article class="card"><h3>Услуга 3</h3><p style="color:var(--color-text-muted)">Описание.</p></article>
+    </div>
+  </section>
+
+  <section id="about" class="wrap" data-reveal>
+    <h2>О нас</h2>
+    <p style="color:var(--color-text-muted);max-width:60ch">Блок доверия из content-стадии.</p>
+  </section>
+
+  <section id="contact" class="wrap" data-reveal>
+    <h2>Заявка</h2>
+    <p style="color:var(--color-text-muted)">Здесь монтируется форма из KIT (.c-form + согласие 152-ФЗ).</p>
+  </section>
+</main>
+
+<footer class="site"><div class="wrap">© Прототип · собрано из KIT (components.html)</div></footer>
+
+<script>
+  // тема восстановлена в <head> (FOUC-fix); здесь — только reveal-on-scroll (once)
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.style.opacity=1;e.target.style.transform='none';io.unobserve(e.target);}});},{rootMargin:'0px 0px -8% 0px'});
+  if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
+    document.querySelectorAll('[data-reveal]').forEach(function(el){
+      el.style.opacity=0; el.style.transform='translateY(12px)'; el.style.transition='opacity .3s var(--ease-out),transform .3s var(--ease-out)'; io.observe(el);
+    });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "scope_tags": [
+    "backend",
+    "data",
+    "security",
+    "ops",
+    "api"
+  ],
+  "selected_roles": [
+    "scoper",
+    "architect",
+    "security",
+    "backend",
+    "qa",
+    "judge"
+  ],
+  "complexity": "high",
+  "rationale": "6-phase build (A-F) spanning backend, data, security, ops. Research solid (37 sources, 0.96 cite). Four open decisions: redresearch nesting (Workflow constraint), MVP depth, agency-panel pattern, prompt versioning. Key risks: orc-nesting blocks Phase C, Reviewer cap=2 needs criteria, Project Transfer complexity hidden. Needs architect/security/ops cross-review.</anionale>\n<parameter name=\"confidence\">0.88",
+  "recommended_mode": "heavy",
+  "needs_user_confirmation": true
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-02T09:00:00Z",
+  "site_type": "landing",
+  "fields": {
+    "q1_company_name": "Берёзовая роща",
+    "q2_industry": "банный комплекс / загородный wellness, премиум",
+    "q3_existing_web_social": "vk.com/berezovayaroshcha; Telegram @berezroshcha; полноценного сайта нет",
+    "q4_current_site_problems": "сайта по сути нет — соцсети + сарафан + реклама у блогеров",
+    "q5_brand_assets": "логотип есть; брендбука нет",
+    "q6_project_description": "премиум банный комплекс на дровах, Новориж 25 км от МКАД; УТП — настоящие дрова, приватность (вся баня одной компании), атмосфера загородного леса",
+    "q7_target_audience": "Москва, 30-45, средний+; компании 4-12 чел; ЛПР чаще женщина-организатор",
+    "q8_timeline": "к осеннему сезону (сентябрь), ~2-3 месяца",
+    "q9_desired_results": "заявки на аренду; продажа подарочных сертификатов; демонстрация атмосферы",
+    "q10_site_purpose": "лендинг: заявки на аренду + сертификаты",
+    "q11_competitors": "«Дубовая бочка» (удобно, но устарел дизайн); «Загородные Сандуны»",
+    "q12_liked_sites": "les-resort (тёмно/дорого), loftwoods (воздух, крупная типографика)",
+    "q24_content_types": "тексты (надо переписать), фото (~200), видео",
+    "q25_content_services": "копирайтинг — переписать тексты из соцсетей",
+    "q26_existing_materials": "профессиональная фотосъёмка ~200 фото + видео на Яндекс.Диске",
+    "q27_promotion": "SEO, Яндекс.Директ, таргет ВКонтакте"
+  },
+  "sources": {
+    "q1_company_name": "materials", "q2_industry": "materials", "q3_existing_web_social": "materials",
+    "q4_current_site_problems": "materials", "q5_brand_assets": "materials", "q6_project_description": "materials",
+    "q7_target_audience": "materials", "q8_timeline": "materials", "q9_desired_results": "materials",
+    "q10_site_purpose": "materials", "q11_competitors": "materials", "q12_liked_sites": "materials",
+    "q24_content_types": "materials", "q25_content_services": "materials", "q26_existing_materials": "materials",
+    "q27_promotion": "materials"
+  }
+}

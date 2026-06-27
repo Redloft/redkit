@@ -1,0 +1,2 @@
+# redresearch: свой фетчер; cross-model (GPT-5/Gemini) опц.
+# none

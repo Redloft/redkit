@@ -1,0 +1,4 @@
+.plan-panel/
+*.bak
+
+.finalize/

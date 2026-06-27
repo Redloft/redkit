@@ -1,0 +1,174 @@
+/* tokens.css — единый слой дизайн-токенов прототипа (БЛОКИРУЮЩИЙ gate ДО компонентов).
+ *
+ * Источник правды для всей «фактуры». Naming — Tailwind-совместимый (на будущее в Next:
+ * --color-bg → bg-background, шкала --text-* → text-sm/base/lg и т.д.).
+ *
+ * Заполняется из brief/visual-taste-profile.json (палитра/тон/референсы). Значения ниже —
+ * НЕЙТРАЛЬНЫЙ seed; design-стадия переопределяет их под конкретный проект.
+ *
+ * Переход атомарный: подключить tokens.css → скриншот без регрессии → удалить дубли
+ * (хардкоженные цвета/радиусы/тени в компонентах). DoD фазы — kit-contracts.md.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ── COLOR (light) — переопредели из taste-profile ── */
+  --color-bg:            #ffffff;   /* фон страницы */
+  --color-surface:       #f6f7f9;   /* карточки/панели */
+  --color-surface-2:     #eceef2;   /* вложенные поверхности */
+  --color-text:          #16181d;   /* основной текст */
+  --color-text-muted:    #5b626e;   /* вторичный текст */
+  --color-border:        #e2e5ea;   /* линии/границы */
+  --color-accent:        #2f6df6;   /* бренд-акцент / CTA */
+  --color-accent-fg:     #ffffff;   /* текст на акценте */
+  --color-accent-hover:  #265fda;
+
+  /* states (общие для интерактива) */
+  --color-success:       #18a558;
+  --color-warning:       #c98a14;
+  --color-danger:        #d23b3b;
+  --color-focus-ring:    color-mix(in srgb, var(--color-accent) 55%, transparent);
+  --color-overlay:       rgba(0,0,0,.45);   /* scrim под modal/drawer (одинаков в обеих темах) */
+
+  /* glass (стекло — для overlays) */
+  --glass-bg:            color-mix(in srgb, var(--color-bg) 72%, transparent);
+  --glass-border:        color-mix(in srgb, var(--color-text) 10%, transparent);
+  --glass-blur:          14px;
+
+  /* бренд-градиент(ы) */
+  --grad-brand: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 60%, #7a5cff));
+
+  /* ── TYPOGRAPHY ── */
+  --font-heading: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-body:    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* модульная шкала (≈1.250 Major Third) */
+  --text-xs:   0.75rem;   /* 12 */
+  --text-sm:   0.875rem;  /* 14 */
+  --text-base: 1rem;      /* 16 */
+  --text-lg:   1.25rem;   /* 20 */
+  --text-xl:   1.563rem;  /* 25 */
+  --text-2xl:  1.953rem;  /* 31 */
+  --text-3xl:  2.441rem;  /* 39 */
+  --text-4xl:  3.052rem;  /* 49 */
+  --leading-tight: 1.15;
+  --leading-normal: 1.5;
+  --weight-normal: 400;
+  --weight-medium: 520;
+  --weight-semibold: 640;
+
+  /* ── SPACING (4px base) ── */
+  --space-1: 0.25rem; --space-2: 0.5rem;  --space-3: 0.75rem; --space-4: 1rem;
+  --space-5: 1.5rem;  --space-6: 2rem;    --space-8: 3rem;    --space-10: 4rem;
+  --space-12: 6rem;   --space-16: 8rem;
+
+  /* ── RADIUS ── */
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px; --radius-full: 9999px;
+
+  /* ── SHADOW ── */
+  --shadow-sm: 0 1px 2px rgba(16,18,29,.06);
+  --shadow-md: 0 4px 16px rgba(16,18,29,.10);
+  --shadow-lg: 0 12px 40px rgba(16,18,29,.16);
+
+  /* ── MOTION (см. motion-checklist.md) ── */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:   cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-drawer:   cubic-bezier(0.32, 0.72, 0, 1);   /* sidebar/drawer вытягивание */
+  --dur-fast: 150ms; --dur-base: 220ms; --dur-slow: 300ms;
+
+  /* layout */
+  --container: 1200px;
+}
+
+/* ── DARK THEME — парная (фаза проверки: скриншоты light/dark) ──
+ * Тёмные ТОКЕНЫ применяются в ДВУХ случаях:
+ *   (1) OS prefers dark И тема не форсирована вручную (media + :not([data-theme="light"]));
+ *   (2) ручной форс :root[data-theme="dark"] (любая OS — это и снимает верификация data-theme).
+ * Значения держать в СИНХРОНЕ между двумя блоками (плата за работу без препроцессора).
+ * Один общий набор объявлений через переменную @custom — нельзя в чистом CSS, потому дублируем. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg:           #0e0f12;
+    --color-surface:      #16181d;
+    --color-surface-2:    #1d2027;
+    --color-text:         #e7e9ee;
+    --color-text-muted:   #9aa0ab;
+    --color-border:       #2a2e37;
+    --color-accent:       #6e9bff;
+    --color-accent-fg:    #0e0f12;
+    --color-accent-hover: #84acff;
+    --glass-bg:           color-mix(in srgb, var(--color-surface) 60%, transparent);
+    --glass-border:       color-mix(in srgb, #ffffff 10%, transparent);
+    --shadow-sm:          0 1px 3px rgba(0,0,0,.32);   /* видимая elevation на тёмном (light .06 невидим) */
+    --shadow-md:          0 4px 16px rgba(0,0,0,.45);
+    --shadow-lg:          0 12px 40px rgba(0,0,0,.55);
+    color-scheme: dark;
+  }
+}
+/* ручной форс data-theme="dark" — те же значения, работает на любой OS (синхрон с блоком выше) */
+:root[data-theme="dark"] {
+  --color-bg:           #0e0f12;
+  --color-surface:      #16181d;
+  --color-surface-2:    #1d2027;
+  --color-text:         #e7e9ee;
+  --color-text-muted:   #9aa0ab;
+  --color-border:       #2a2e37;
+  --color-accent:       #6e9bff;
+  --color-accent-fg:    #0e0f12;
+  --color-accent-hover: #84acff;
+  --glass-bg:           color-mix(in srgb, var(--color-surface) 60%, transparent);
+  --glass-border:       color-mix(in srgb, #ffffff 10%, transparent);
+  --shadow-sm:          0 1px 3px rgba(0,0,0,.32);   /* видимая elevation на тёмном (light .06 невидим) */
+  --shadow-md:          0 4px 16px rgba(0,0,0,.45);
+  --shadow-lg:          0 12px 40px rgba(0,0,0,.55);
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }   /* форс light перебивает OS-dark */
+
+/* ── базовые сбросы, завязанные на токены ── */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--color-bg); color: var(--color-text);
+  font-family: var(--font-body); font-size: var(--text-base);
+  line-height: var(--leading-normal); -webkit-font-smoothing: antialiased;
+}
+h1,h2,h3,h4 { font-family: var(--font-heading); line-height: var(--leading-tight); font-weight: var(--weight-semibold); }
+/* ⚠️ обязательно: ссылки наследуют цвет (частый dark-баг — синие ссылки на тёмном) */
+a { color: inherit; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+img, video, svg { max-width: 100%; height: auto; }
+
+/* ── glass-утилита (для overlays: popup/sidebar/modal/dropdown/tooltip/toast) ── */
+.u-glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+/* ── focus-ring (видимый, единый; НЕ убирать outline без замены) ── */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── visually-hidden (вместо display:none для скринридеров) ── */
+.u-visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* ── reduced-motion: УБРАТЬ движение (НЕ заменять на *{0.01ms} — это «быстрое движение», не «без движения») ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important; scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}

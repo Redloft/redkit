@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KIT — библиотека компонентов</title>
+<script>/* FOUC-fix: ставим тему ДО first paint (blocking в head) */ var NS='proto:'; (function(){var s=localStorage.getItem(NS+'theme'); if(s) document.documentElement.setAttribute('data-theme', s);})();</script>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ── только КОМПОНЕНТНЫЕ правила; цвета/радиусы/тени — ТОЛЬКО через var(--…) из tokens.css ── */
+  body { padding: 0; }
+  .kit-wrap { max-width: var(--container); margin: 0 auto; padding: var(--space-6) var(--space-5) var(--space-16); }
+  .kit-top { display:flex; align-items:center; gap:var(--space-4); padding:var(--space-4) 0; border-bottom:1px solid var(--color-border); }
+  .kit-top h1 { font-size: var(--text-2xl); margin:0; }
+  .kit-group { margin-top: var(--space-8); }
+  .kit-group > h2 { font-size: var(--text-lg); color: var(--color-text); border-left:3px solid var(--color-accent); padding-left:var(--space-3); }
+  .kit-row { display:flex; flex-wrap:wrap; gap:var(--space-4); align-items:flex-start; margin-top: var(--space-4); }
+  .kit-cell { background: var(--color-surface); border:1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--space-5); }
+  .kit-label { font-size: var(--text-xs); color: var(--color-text-muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom: var(--space-3); }
+
+  /* Header */
+  .c-header { display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); padding:var(--space-3) var(--space-5); background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-lg); }
+  .c-nav { display:flex; gap:var(--space-4); }
+  .c-nav a { text-decoration:none; transition:color var(--dur-fast) var(--ease-out); }
+  .c-nav a:hover { color: var(--color-accent); }
+
+  /* Buttons (все states) */
+  .c-btn { display:inline-flex; align-items:center; justify-content:center; gap:var(--space-2); border:1px solid transparent; border-radius:var(--radius-md);
+    min-height:44px; padding:var(--space-2) var(--space-4); font:inherit; font-weight:var(--weight-medium); cursor:pointer;  /* tap-target ≥44px (kit-contracts §4) */
+    transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+  .c-btn:active { transform: scale(.97); }
+  .c-btn[disabled] { opacity:.5; cursor:not-allowed; }
+  .c-btn--primary { background:var(--color-accent); color:var(--color-accent-fg); }
+  .c-btn--primary:hover { background:var(--color-accent-hover); }
+  .c-btn--ghost { background:transparent; border-color:var(--color-border); color:var(--color-text); }
+  .c-btn--ghost:hover { border-color:var(--color-accent); }
+  .c-btn .spinner { width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:var(--radius-full); }
+  @media (prefers-reduced-motion: no-preference){ .c-btn[data-loading] .spinner{ animation:spin .7s linear infinite } }
+  @keyframes spin { to { transform: rotate(360deg) } }
+
+  /* Card (hover-lift) */
+  .c-card { background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius-lg);
+    box-shadow:var(--shadow-sm); padding:var(--space-5); width:260px;
+    transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out); }
+  .c-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); }
+  .c-card img { border-radius:var(--radius-md); aspect-ratio:16/10; object-fit:cover; width:100%; background:var(--color-surface-2); }
+
+  /* Form */
+  .c-field { display:flex; flex-direction:column; gap:var(--space-2); margin-bottom:var(--space-4); }
+  .c-field label { font-size:var(--text-sm); color:var(--color-text-muted); }
+  .c-input { padding:var(--space-2) var(--space-3); border:1px solid var(--color-border); border-radius:var(--radius-md);
+    background:var(--color-bg); color:var(--color-text); font:inherit; transition:border-color var(--dur-fast) var(--ease-out); }
+  .c-input:focus { border-color:var(--color-accent); }  /* + глобальный focus-ring из tokens.css */
+  .c-field[data-error] .c-input { border-color:var(--color-danger); }
+  .c-field .err { font-size:var(--text-xs); color:var(--color-danger); display:none; }
+  .c-field[data-error] .err { display:block; }
+  .c-consent { display:flex; gap:var(--space-2); align-items:flex-start; font-size:var(--text-sm); color:var(--color-text-muted); }
+  /* form success-state (kit-contracts §2: idle/focus/error/validating/success) */
+  .c-form-ok { padding:var(--space-3) var(--space-4); border-radius:var(--radius-md); font-size:var(--text-sm);
+    background:color-mix(in srgb, var(--color-success) 14%, transparent); color:var(--color-success);
+    border:1px solid color-mix(in srgb, var(--color-success) 35%, transparent); }
+
+  /* Overlay (glass + rounded + origin-aware) */
+  .c-backdrop { position:fixed; inset:0; background:var(--color-overlay); display:none; place-items:center; z-index:50; }
+  .c-backdrop[data-open] { display:grid; }
+  .c-modal { width:min(420px,92vw); padding:var(--space-6); transform-origin:center;
+    animation: pop var(--dur-base) var(--ease-out); }
+  @keyframes pop { from { opacity:0; transform:scale(.98) } to { opacity:1; transform:scale(1) } }
+  @media (prefers-reduced-motion: reduce){ .c-modal{ animation:none } }
+</style>
+</head>
+<body>
+<div class="kit-wrap">
+  <div class="kit-top">
+    <h1>KIT — библиотека компонентов</h1>
+    <span class="kit-label" style="margin:0">источник правды для всей вёрстки</span>
+    <span style="flex:1"></span>
+    <button class="c-btn c-btn--ghost c-theme-toggle" id="theme" aria-pressed="false">🌓 Тема</button>
+  </div>
+
+  <!-- ── Навигация / каркас ── -->
+  <section class="kit-group" data-reveal>
+    <h2>Навигация / каркас</h2>
+    <div class="kit-row"><div class="kit-cell" style="width:100%">
+      <div class="kit-label">.c-header</div>
+      <div class="c-header"><strong>Лого</strong><nav class="c-nav"><a href="#">Услуги</a><a href="#">О нас</a><a href="#">Контакты</a></nav><button class="c-btn c-btn--primary">Заявка</button></div>
+    </div></div>
+  </section>
+
+  <!-- ── Кнопки / контролы (state-matrix) ── -->
+  <section class="kit-group" data-reveal>
+    <h2>Кнопки / контролы</h2>
+    <div class="kit-row">
+      <div class="kit-cell"><div class="kit-label">primary · idle/hover/active/focus</div><button class="c-btn c-btn--primary">Забронировать</button></div>
+      <div class="kit-cell"><div class="kit-label">primary · loading</div><button class="c-btn c-btn--primary" data-loading><span class="spinner"></span>Отправка…</button></div>
+      <div class="kit-cell"><div class="kit-label">primary · disabled</div><button class="c-btn c-btn--primary" disabled>Недоступно</button></div>
+      <div class="kit-cell"><div class="kit-label">ghost</div><button class="c-btn c-btn--ghost">Подробнее</button></div>
+    </div>
+  </section>
+
+  <!-- ── Карточки / контент ── -->
+  <section class="kit-group" data-reveal>
+    <h2>Карточки / контент</h2>
+    <div class="kit-row">
+      <div class="c-card"><img alt=""><h3 style="margin:var(--space-3) 0 var(--space-2);font-size:var(--text-lg)">Услуга</h3><p style="color:var(--color-text-muted);font-size:var(--text-sm)">Короткое описание услуги в одну-две строки.</p><button class="c-btn c-btn--ghost">Выбрать</button></div>
+    </div>
+  </section>
+
+  <!-- ── Формы / интерактив (152-ФЗ; states: idle/focus/error/validating/success) ── -->
+  <section class="kit-group" data-reveal>
+    <h2>Формы / интерактив</h2>
+    <div class="kit-row">
+      <form class="kit-cell c-form" style="width:340px" onsubmit="return false">
+        <div class="c-field"><label for="f-name">Имя</label><input id="f-name" class="c-input" placeholder="Как к вам обращаться"></div>
+        <div class="c-field" data-error><label for="f-phone">Телефон</label><input id="f-phone" class="c-input" value="+7 000" aria-invalid="true" aria-describedby="f-phone-err"><span class="err" id="f-phone-err">Введите корректный номер</span></div>
+        <label class="c-consent"><input type="checkbox" id="f-consent" required> Согласен на обработку персональных данных (152-ФЗ) <a href="#">политика</a></label>
+        <button class="c-btn c-btn--primary" id="f-submit" style="margin-top:var(--space-4)" disabled>Отправить заявку</button>
+      </form>
+      <div class="kit-cell" style="width:300px">
+        <div class="kit-label">состояния submit: validating · success</div>
+        <button class="c-btn c-btn--primary" data-loading><span class="spinner"></span>Отправка…</button>
+        <div class="c-form-ok" role="status" style="margin-top:var(--space-4)">✓ Заявка отправлена — перезвоним в течение часа</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Overlays (glass + rounded + origin-aware) ── -->
+  <section class="kit-group" data-reveal>
+    <h2>Overlays</h2>
+    <div class="kit-row"><div class="kit-cell"><div class="kit-label">.c-modal (glass, focus-trap, Esc)</div><button class="c-btn c-btn--primary" id="openModal">Открыть modal</button></div></div>
+  </section>
+</div>
+
+<div class="c-backdrop" id="backdrop">
+  <div class="c-modal u-glass" role="dialog" aria-modal="true" aria-label="Пример modal" tabindex="-1">
+    <h3 style="margin-top:0">Modal на стекле</h3>
+    <p style="color:var(--color-text-muted)">Esc или клик по фону — закрыть. Фокус заперт внутри.</p>
+    <button class="c-btn c-btn--primary" id="closeModal">Понятно</button>
+  </div>
+</div>
+
+<script>
+  // theme toggle (NS + восстановление темы — в <head> для FOUC-fix; здесь только переключение)
+  var root = document.documentElement;
+  var themeBtn = document.getElementById('theme');
+  themeBtn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark');   // синхрон с head-restore
+  themeBtn.addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', cur); localStorage.setItem(NS+'theme', cur);
+    themeBtn.setAttribute('aria-pressed', cur === 'dark');
+  });
+
+  // reveal-on-scroll (once) + [data-stagger] каскад детей (motion-checklist.md)
+  var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.style.opacity=1; e.target.style.transform='none'; io.unobserve(e.target);} }); }, {rootMargin:'0px 0px -8% 0px'});
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.querySelectorAll('[data-stagger]').forEach(function(box){
+      Array.prototype.forEach.call(box.children, function(ch,i){ ch.style.transitionDelay = Math.min(i*60,300)+'ms'; });
+    });
+    document.querySelectorAll('[data-reveal]').forEach(function(el){
+      el.style.opacity=0; el.style.transform='translateY(12px)'; el.style.transition='opacity .3s var(--ease-out), transform .3s var(--ease-out)'; io.observe(el);
+    });
+  }
+
+  // modal (focus-trap + Esc) — kit-contracts §4: фокус не уходит за пределы диалога
+  var bd = document.getElementById('backdrop');
+  var modal = bd.querySelector('.c-modal');
+  var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  function openM(){ bd.setAttribute('data-open',''); (modal.querySelector(FOCUSABLE)||modal).focus(); }
+  function closeM(){ bd.removeAttribute('data-open'); document.getElementById('openModal').focus(); }
+  document.getElementById('openModal').addEventListener('click', openM);
+  document.getElementById('closeModal').addEventListener('click', closeM);
+  bd.addEventListener('click', function(e){ if(e.target===bd) closeM(); });
+  document.addEventListener('keydown', function(e){
+    if(!bd.hasAttribute('data-open')) return;
+    if(e.key==='Escape'){ closeM(); return; }
+    if(e.key!=='Tab') return;
+    var f = modal.querySelectorAll(FOCUSABLE);
+    if(!f.length){ e.preventDefault(); return; }        // нет фокусируемого — держим фокус в диалоге
+    var first=f[0], last=f[f.length-1], cur=document.activeElement;
+    if(e.shiftKey && (cur===first || !modal.contains(cur))){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && (cur===last || !modal.contains(cur))){ e.preventDefault(); first.focus(); }
+  });
+
+  // 152-ФЗ: submit заблокирован без согласия на обработку ПДн (kit-contracts §7)
+  var consent = document.getElementById('f-consent'), submitBtn = document.getElementById('f-submit');
+  function syncConsent(){ submitBtn.disabled = !consent.checked; }
+  consent.addEventListener('change', syncConsent); syncConsent();
+</script>
+</body>
+</html>

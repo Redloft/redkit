@@ -1,0 +1,14 @@
+# Ссылки от клиента (конкуренты + визуальные референсы)
+# Briefing ОБЯЗАН прогнать каждую через validate_url() ДО fetch (SSRF, DR-7).
+# Все — публичные https, должны пройти guard.
+
+# Конкуренты (Q11)
+https://dubovaya-bochka.example.ru/
+https://zagorodnye-sanduny.example.ru/ceny
+
+# Нравятся визуально (Q12 → visual taste)
+https://les-resort.example.com/
+https://loftwoods.example.com/
+
+# Соцсети клиента (Q3)
+https://vk.com/berezovayaroshcha

@@ -1,0 +1,52 @@
+{
+  "manifest_version": 1,
+  "description": "redloft methodology kit — tier → files. Assembler (lib/methodology.sh) unions tiers 0..N.",
+  "tiers": {
+    "0": [
+      { "src": "tier-0/START-HERE.md",            "dest": "START-HERE.md",            "substitute": true,  "tier_blocks": true },
+      { "src": "tier-0/CLAUDE.md",                "dest": "CLAUDE.md",                "substitute": true,  "tier_blocks": false },
+      { "src": "tier-0/README.md",                "dest": "README.md",                "substitute": true,  "tier_blocks": false },
+      { "src": "tier-0/.gitignore",               "dest": ".gitignore",               "substitute": true,  "tier_blocks": false },
+      { "src": "tier-0/docs/HARD-RULES.md",       "dest": "docs/HARD-RULES.md",       "substitute": true,  "tier_blocks": false },
+      { "src": "tier-0/supabase/rls-bootstrap.sql","dest": "supabase/rls-bootstrap.sql","substitute": true, "tier_blocks": false }
+    ],
+    "1": [
+      { "src": "tier-1/docs/tasks/PROTOCOL.md",         "dest": "docs/tasks/PROTOCOL.md",         "substitute": true,  "tier_blocks": false },
+      { "src": "tier-1/docs/tasks/TASK-TEMPLATE.md",    "dest": "docs/tasks/TASK-TEMPLATE.md",    "substitute": true,  "tier_blocks": false },
+      { "src": "tier-1/docs/tasks/pending/.gitkeep",    "dest": "docs/tasks/pending/.gitkeep",    "substitute": false, "tier_blocks": false },
+      { "src": "tier-1/docs/tasks/ready/.gitkeep",      "dest": "docs/tasks/ready/.gitkeep",      "substitute": false, "tier_blocks": false },
+      { "src": "tier-1/docs/tasks/in_progress/.gitkeep","dest": "docs/tasks/in_progress/.gitkeep","substitute": false, "tier_blocks": false },
+      { "src": "tier-1/docs/tasks/done/.gitkeep",       "dest": "docs/tasks/done/.gitkeep",       "substitute": false, "tier_blocks": false },
+      { "src": "tier-1/docs/prompts/iteration.md",      "dest": "docs/prompts/iteration.md",      "substitute": true,  "tier_blocks": false },
+      { "src": "tier-1/docs/working-protocol.md",       "dest": "docs/working-protocol.md",       "substitute": true,  "tier_blocks": false }
+    ],
+    "2": [
+      { "src": "tier-2/docs/chats/REGISTRY.md",                       "dest": "docs/chats/REGISTRY.md",                       "substitute": true, "tier_blocks": false },
+      { "src": "tier-2/docs/chats/handoff-queue.md",                  "dest": "docs/chats/handoff-queue.md",                  "substitute": true, "tier_blocks": false },
+      { "src": "tier-2/docs/methodology-proposals/README.md",         "dest": "docs/methodology-proposals/README.md",         "substitute": true, "tier_blocks": false },
+      { "src": "tier-2/docs/methodology-proposals/INDEX.md",          "dest": "docs/methodology-proposals/INDEX.md",          "substitute": true, "tier_blocks": false },
+      { "src": "tier-2/docs/methodology-proposals/MP-TEMPLATE.md",    "dest": "docs/methodology-proposals/MP-TEMPLATE.md",    "substitute": false, "tier_blocks": false },
+      { "src": "tier-2/docs/product-principles.md",                   "dest": "docs/product-principles.md",                   "substitute": true, "tier_blocks": false }
+    ],
+    "3": [
+      { "src": "tier-3/docs/security-quality-gate.md",      "dest": "docs/security-quality-gate.md",      "substitute": true,  "tier_blocks": false },
+      { "src": "tier-3/docs/performance-quality-gate.md",   "dest": "docs/performance-quality-gate.md",   "substitute": true,  "tier_blocks": false },
+      { "src": "tier-3/docs/feedback-journal.md",           "dest": "docs/feedback-journal.md",           "substitute": true,  "tier_blocks": false },
+      { "src": "tier-3/.github/workflows/auto-merge.yml",   "dest": ".github/workflows/auto-merge.yml",   "substitute": false, "tier_blocks": false },
+      { "src": "tier-3/routines/R1-night-stabilization.md", "dest": "routines/R1-night-stabilization.md", "substitute": true,  "tier_blocks": false, "skip_site_types": ["landing", "visitka", "blog"] },
+      { "src": "tier-3/routines/R2-scenario-runner.md",     "dest": "routines/R2-scenario-runner.md",     "substitute": true,  "tier_blocks": false, "skip_site_types": ["landing", "visitka", "blog"] },
+      { "src": "tier-3/routines/R3-weekly-gardener.md",     "dest": "routines/R3-weekly-gardener.md",     "substitute": true,  "tier_blocks": false, "skip_site_types": ["landing", "visitka", "blog"] },
+      { "src": "tier-3/routines/R4-playground-tests.md",    "dest": "routines/R4-playground-tests.md",    "substitute": true,  "tier_blocks": false, "skip_site_types": ["landing", "visitka", "blog"] }
+    ],
+    "4": [
+      { "src": "tier-4/docs/goal-pursuit.md",   "dest": "docs/goal-pursuit.md",   "substitute": true,  "tier_blocks": false },
+      { "src": "tier-4/docs/codegraph-setup.md","dest": "docs/codegraph-setup.md","substitute": true,  "tier_blocks": false },
+      { "src": "tier-4/.goal/.gitkeep",         "dest": ".goal/.gitkeep",         "substitute": false, "tier_blocks": false }
+    ]
+  },
+  "tier_block_markers": {
+    "comment": "Blocks gated by <!-- BEGIN TIER-N --> .. <!-- END TIER-N -->. Kept only if selected tier >= N. TIER-1-ONLY kept only when selected tier == 1.",
+    "begin": "<!-- BEGIN TIER-",
+    "end": "<!-- END TIER-"
+  }
+}

@@ -1,0 +1,1 @@
+# redsemantic: свои адаптеры; none

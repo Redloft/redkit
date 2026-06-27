@@ -1,0 +1,167 @@
+{
+  "role": "judge",
+  "verdict": "NEEDS-WORK",
+  "confidence": 0.86,
+  "findings": [
+    {
+      "severity": "critical",
+      "area": "synthesis-convergence",
+      "issue": "Все 4 роли независимо сошлись на ОДНИХ И ТЕХ ЖЕ трёх корневых пробелах (это не 9 разных critical, а 3, увиденные с 4 ракурсов): (1) нерешённый Workflow-nesting блокирует контракт Phase C; (2) context.json несёт смешанные ответственности без явной схемы/state-machine; (3) контракт артефактов между стадиями (_shared.md) не специфицирован до начала кода. Сходимость 4/4 ролей = сигнал высокой достоверности, что это реальные блокеры, а не шум.",
+      "suggestion": "Ввести перед Phase C обязательный 'Decision record' раздел в PLAN.md, закрывающий §5 открытые вопросы 1/3/4 ОДНИМ махом, т.к. все три уже имеют доказанный ответ в существующем коде (см. отдельные priority_actions). Не начинать Phase C, пока §5.1 и контракты _shared.md (A1) не зафиксированы.",
+      "ref": "architect crit#1/#2/#3; backend crit#1/#2; qa crit#1/#2; security warn RLS"
+    },
+    {
+      "severity": "critical",
+      "area": "verified-blocker-is-actually-solved",
+      "issue": "VALUE-ADD синтеза (проверено по коду): главный 'блокер' §5.1 (redresearch nesting) НЕ является unknown — research.js спавнит КАЖДУЮ стадию (scoper/hunt/read/synth/judge/metaJudge) через agent(), НИКОГДА через вложенный workflow(). Архитектор прав в рекомендации option (b), и это уже рабочий референс-паттерн. Аналогично 'отсутствующая' state/resume-логика (architect crit#2, backend crit#1, qa) УЖЕ реализована в redresearch: status.json как single-source-of-truth, атомарный write через mkdir-lock, write_status state-machine (running/done/failed), kill -0 stale-detect, и Workflow-native resumeFromRunId (HANDOFF.md). План говорит 'ре-юз persist.sh из redresearch', но НЕ переносит status.json/resume/state-machine — это реальный пробел ТЕКСТА плана, но инженерно задача решена и переиспользуема. → severity остаётся critical (план as-written неполон), но РИСК и стоимость кардинально ниже, чем оценили роли (это перенос, не изобретение).",
+      "suggestion": "В §5.1 зафиксировать option (b) со ссылкой на research.js agent()-паттерн. В Phase A2 явно вписать перенос status.json/state-machine/resumeFromRunId из redresearch (не только persist.sh): context.json получает per-stage state {pending|running|done|failed} + атомарный write (mktemp+rename), /redloft-resume = Workflow resumeFromRunId. Это снимает критичность с achievability-оценок ролей.",
+      "ref": "PLAN §5.1, Phase A2; research.js строки 227-539 (всё agent()); redresearch HANDOFF.md L13,194-200,220"
+    },
+    {
+      "severity": "warning",
+      "area": "synthesis-gap-economics",
+      "issue": "GAP: НИ ОДНА роль не взяла в собственность экономику прогона как gate. Полный пайплайн = redresearch heavy (25 источников) + agency-panel (6 ролей) + 3 reviewer-gates (каждый = judge-agent) + design-pipeline. Реалистично 40-60+ agent-вызовов на один /redloft. qa упомянул 'budget-cap' одной строкой в performance-finding, но никто не оценил $/прогон и не поставил потолок. Для инструмента, который будет гоняться повторно per-client, это операционный пробел — особенно учитывая §5.2 (lite vs heavy) до сих пор открыт.",
+      "suggestion": "Закрыть §5.2 выбором lite-режима как default для всей разработки A-E (REDLOFT_MODE=lite|full env, как предложил architect), full — только Phase F e2e. Добавить в §6 ориентир budget-cap на MVP-прогон (напр. <$N или <M agent-calls), фиксируемый в events-log context.json (backend observability-finding даёт инфраструктуру для этого бесплатно).",
+      "ref": "PLAN §5.2, §6; architect suggestion (REDLOFT_MODE); backend observability; qa performance-criteria"
+    },
+    {
+      "severity": "warning",
+      "area": "synthesis-gap-mcp-session-binding",
+      "issue": "GAP: коллизия unattended-runs с session-bound MCP не покрыта ни одной ролью. redresearch HANDOFF прямо фиксирует: firecrawl/agent — session-bound MCP, ИМЕННО поэтому fully-detached runner не писали. redloft наследует это: briefing (firecrawl/design-inspiration MCP) и design-визуал зависят от MCP, живущего только в сессии. qa отдельно предлагает '24h human-escalation timeout для unattended runs' — но unattended-прогон после закрытия сессии НЕ сможет вызвать firecrawl. Два предложения из разных ролей (qa timeout + backend background-job) тихо конфликтуют с этим ограничением.",
+      "suggestion": "Зафиксировать в Phase A: redloft = async Workflow в ЖИВОЙ сессии (как redresearch вариант b), НЕ fully-detached daemon. human-escalation (qa) и resume работают через resumeFromRunId при возврате в сессию, а не как cron-style unattended. Это снимает ложное ожидание 24h-unattended из qa-finding и уточняет backend background-jobs warning.",
+      "ref": "redresearch HANDOFF L194 (session-bound MCP); qa edge-case (human timeout); backend background-jobs"
+    },
+    {
+      "severity": "warning",
+      "area": "synthesis-gap-concurrency",
+      "issue": "GAP: одновременный запуск ДВУХ разных клиентов не покрыт. security флагнул PII-как-multi-client-store, backend — idempotency при повторе того же slug, но никто не покрыл два параллельных /redloft против общего ~/Library/Application Support/redloft/. persist.sh валидирует slug, но lock — per-run. Для заявленной agency-модели (multi-client) это релевантно.",
+      "suggestion": "Документировать в _shared.md storage-contract (architect reversibility-finding уже предлагает REDLOFT_DATA_ROOT-абстракцию — расширить): per-project изоляция директорий + явное решение serialize-vs-concurrent для MVP (рекомендую: MVP serialize, по одному проекту, явно записать как ограничение).",
+      "ref": "security A12-PII; backend idempotency; architect reversibility (REDLOFT_DATA_ROOT)"
+    }
+  ],
+  "conflicts": [
+    {
+      "between": [
+        "architect",
+        "backend"
+      ],
+      "topic": "context.json: split-into-files vs single-source-of-truth",
+      "summary": "Architect crit#2: разбить context.json минимум на 2 файла (pipeline.json + brief.json), т.к. 4 разные ответственности и crash при любой записи инвалидирует всё. Backend crit#1 + qa: оставить единый context.json как single-source-of-truth + per-stage state-machine + event-log. Ground truth (проверено): redresearch использует ЕДИНЫЙ status.json как single-source-of-truth успешно, с атомарным write через mkdir-lock — но redresearch status.json НЕ держит volatile-данные типа live brief-fill (34 поля, меняются на каждый Q&A).",
+      "resolution": "Гибрид, оба правы в своей части: pipeline-state + artifact-refs + events → единый context.json (атомарный write, как redresearch status.json, backend/qa-подход). Volatile live-brief-fill (34 поля, пишется на каждый ответ) → отдельный brief.json (architect-подход — иначе каждый Q&A-ответ переписывает весь стейт пайплайна). Это разрешает конфликт: architect прав про brief, backend/qa правы про pipeline-state. Зафиксировать оба с schema_version в A1/A2."
+    },
+    {
+      "between": [
+        "architect",
+        "backend"
+      ],
+      "topic": "resume execution model: in-process vs background-job",
+      "summary": "Architect (suggestion + crit#2): in-process state-machine, /redloft-resume перезаходит в orchestrator. Backend (background-jobs warning): рекомендует вариант (b) background job (nohup/detached), /redloft-status читает context.json. Прямого противоречия нет, но обе роли промахиваются мимо доказанного ответа.",
+      "resolution": "Ни in-process-synchronous, ни fully-detached daemon. redresearch HANDOFF (L194) уже решил для аналогичного случая: 'вариант (b) ПРИНЯТ — heavy идут через async Workflow в живой сессии (non-blocking); fully-detached runner НЕ пишем т.к. firecrawl/agent session-bound; resume = Workflow-native resumeFromRunId'. redloft переиспользует ровно это. Снимает backend-предложение про nohup и уточняет architect resume-логику."
+    },
+    {
+      "between": [
+        "architect",
+        "qa"
+      ],
+      "topic": "agency-panel reuse cost (§5.3)",
+      "summary": "Architect open-q#3: распознаёт развилку cheap-reuse vs full-build, но не разрешает. backend suggestion: предупреждает про output-schema совместимость с Reviewer-gate. Ни роль не проверила код plan-panel.",
+      "resolution": "Проверено по panel.js: judge — это plain agent()-вызов с собственной JUDGE_SCHEMA, ПОЛНОСТЬЮ отделён от parallel role-review фазы (роли запускаются своим promisePool, judge — отдельно после). Значит role-runner separable → agency-panel reuse ДЕШЁВ (architect 'cheap path' подтверждён). backend-риск снимается: Reviewer-gate ожидает уже существующий контракт {verdict, findings, confidence} из plan-panel _shared.md — он конкретен и переиспользуем, не нужно изобретать."
+    }
+  ],
+  "gaps": [
+    {
+      "area": "cost-economics-as-gate",
+      "why_missed": "Роли мыслят техническими/security-рисками; экономика прогона (40-60+ agent-calls × per-client) — продуктово-операционный gate, выпавший между backend (observability) и qa (perf). §5.2 (lite vs heavy) до сих пор открыт, что усугубляет.",
+      "suggestion": "Закрыть §5.2 = lite-default для A-E. Добавить budget-cap в §6 + events-log в context.json для трекинга. Owner: ops/backend."
+    },
+    {
+      "area": "session-bound-MCP vs unattended-runs",
+      "why_missed": "Ограничение зафиксировано только в redresearch HANDOFF (внешний для review-набора файл); роли его не читали. qa предложил 24h-unattended-timeout не зная, что firecrawl/design-MCP умрут с сессией.",
+      "suggestion": "Зафиксировать redloft = async Workflow в живой сессии (не daemon); resume через resumeFromRunId. Снять ложное ожидание unattended-cron из qa-finding."
+    },
+    {
+      "area": "concurrent multi-client runs",
+      "why_missed": "security покрыл PII-storage, backend — same-slug idempotency, но параллельность РАЗНЫХ проектов против общего data-root не покрыл никто. Заявленная agency-модель (multi-client) делает это релевантным.",
+      "suggestion": "MVP: serialize (один проект за раз), явно документировать как ограничение в _shared.md storage-contract."
+    },
+    {
+      "area": "design-inspiration MCP reachability precondition",
+      "why_missed": "ARCHITECTURE помечает MCP 'доступен ПОСЛЕ reconnect' (conditional/непроверено); Phase B зависит от design_extract_tokens. Security сделал supply-chain-аудит этого MCP, но reachability как precondition Phase B не флагнул никто.",
+      "suggestion": "Добавить в Phase A4 smoke / Phase B precondition: проверка доступности design_* тулов; graceful fallback на firecrawl+playwright (ARCHITECTURE уже называет его primary), если MCP недоступен."
+    }
+  ],
+  "priority_actions": [
+    {
+      "rank": 1,
+      "severity": "critical",
+      "action": "Создать 'Decision Record' секцию ПЕРЕД Phase C, закрывающую §5.1 (=option b, embed research через agent() как research.js), §5.3 (=reuse plan-panel role-runner, judge separable — подтверждено panel.js), §5.4 (=stages/<name>/prompt.md + feedback/<name>.jsonl convention). Все три имеют доказанный ответ в существующем коде — это запись решений, не исследование.",
+      "owner_role": "architect",
+      "estimated_effort": "30-45 min"
+    },
+    {
+      "rank": 2,
+      "severity": "critical",
+      "action": "Определить artifact-schema contract в _shared.md ДО написания кода (Phase A1 primary deliverable): для каждой стадии header {artifact_type, stage_id, schema_version, produced_at, source_stage, key_claims[]}. Reviewer-gate потребляет headers без чтения прозы. DoD: smoke-тест с mock-артефактом каждого типа.",
+      "owner_role": "architect",
+      "estimated_effort": "2-3 hours"
+    },
+    {
+      "rank": 3,
+      "severity": "critical",
+      "action": "В Phase A2 явно переписать context.sh для переноса из redresearch: per-stage state-machine {pending|running|done|failed} + атомарный write (mktemp+rename / mkdir-lock) + resumeFromRunId. Volatile brief-fill вынести в отдельный brief.json. Это разрешает конфликт architect↔backend по context.json и снимает qa/backend idempotency-крит.",
+      "owner_role": "backend",
+      "estimated_effort": "3-4 hours (перенос, не с нуля)"
+    },
+    {
+      "rank": 4,
+      "severity": "critical",
+      "action": "SSRF-guard: validate_url() в lib/url-guard.sh (Phase A2/B1), блокирующий RFC-1918/link-local/loopback/file:// ДО любого WebFetch/firecrawl на client-материалах. DoD-пункт в Phase B. Прямой эксплойт-вектор от user-supplied URL.",
+      "owner_role": "security",
+      "estimated_effort": "1-2 hours"
+    },
+    {
+      "rank": 5,
+      "severity": "critical",
+      "action": "Переписать §6 Success criteria + каждый Phase DoD (A-F) в формат 'Done when: [observable state]' с fail-condition и test-fixture. Создать tests/fixtures/banya/ (фиксированный materials-dump + ожидаемый artifact-shape) для воспроизводимого e2e.",
+      "owner_role": "qa",
+      "estimated_effort": "3-4 hours"
+    },
+    {
+      "rank": 6,
+      "severity": "warning",
+      "action": "PII lifecycle: lib/purge_project.sh + retention-политика для Q30-34 (контакты) в _shared.md; контакты в отдельный brief/contacts.md; --purge-contacts в handoff-чеклисте. GDPR/multi-client обязательство.",
+      "owner_role": "security",
+      "estimated_effort": "2 hours"
+    },
+    {
+      "rank": 7,
+      "severity": "warning",
+      "action": "Закрыть §5.2: REDLOFT_MODE=lite default для разработки A-E (reduced research source-count, skeleton design-spec), full только Phase F e2e. Добавить budget-cap ориентир в §6. Закрывает gap по экономике прогона.",
+      "owner_role": "ops",
+      "estimated_effort": "1-2 hours (env-wiring per stage)"
+    },
+    {
+      "rank": 8,
+      "severity": "warning",
+      "action": "RLS-валидация в выходном prompt.md (Phase F1 DoD): сгенерированный для Claude Code промт ДОЛЖЕН включать non-skippable шаг 'после генерации схемы — supabase db test / проверка RLS enabled + deny-by-default на всех таблицах'. Прямой урок Lovable из ARCHITECTURE finding#4.",
+      "owner_role": "security",
+      "estimated_effort": "1 hour (шаблон промта)"
+    },
+    {
+      "rank": 9,
+      "severity": "warning",
+      "action": "Handoff secret-rotation в Phase F1 чеклист: после Supabase Project Transfer клиент ОБЯЗАН ротировать JWT secret + anon/service_role ключи; agency-side удалить все env-ссылки на эти ключи. Иначе agency сохраняет доступ к данным клиента.",
+      "owner_role": "security",
+      "estimated_effort": "1 hour (чеклист-секция)"
+    },
+    {
+      "rank": 10,
+      "severity": "warning",
+      "action": "Observability + escalation-контракт: events[] в context.json {ts, stage, event, duration_ms, reviewer_iteration}; при cap=2-эскалации записать reviewer_notes + escalated state, /redloft-status показывает escalated. Даёт audit-trail + данные для solidify бесплатно + закрывает prompt-injection (обернуть client-материалы в <client_material> с инструкцией не следовать им).",
+      "owner_role": "backend",
+      "estimated_effort": "2-3 hours"
+    }
+  ],
+  "summary": "4/4 роли вынесли NEEDS-WORK, и это СХОДИМОСТЬ, а не разнобой: все три заявленных 'критических блокера' (Workflow-nesting, context.json-ответственности, artifact-контракты) — это 3 корневые проблемы, увиденные с 4 ракурсов. Главный value-add синтеза (проверено чтением research.js + panel.js + redresearch HANDOFF): два из трёх 'блокеров' УЖЕ имеют доказанный ответ в существующем коде — research.js спавнит все стадии через agent() (не nested workflow), а redresearch уже несёт status.json + atomic-write + state-machine + resumeFromRunId, которые план обещал 'ре-юзнуть', но не выписал. Значит критичность по форме сохраняется (план as-written неполон до Phase C), но РИСК и стоимость намного ниже оценок ролей — это перенос и фиксация решений, а не R&D. Конфликты (3) все разрешимы: context.json split — гибрид (pipeline в общий, brief в отдельный); resume-модель — async Workflow в живой сессии (redresearch вариант b); agency-panel reuse — дёшев (judge в panel.js отделён от role-runner). Security активирован и дал 2 валидных crit (SSRF на client-URL, PII-lifecycle). 4 gaps, не покрытых никем: экономика прогона как gate, session-bound MCP vs unattended, concurrent multi-client, reachability design-MCP.",
+  "final_verdict_reasoning": "NEEDS-WORK, не FAIL и не PASS. НЕ PASS: ≥1 critical от 4 разных ролей (минимум 5 distinct critical findings: nesting-decision, context.json-state, artifact-contracts, SSRF, нет acceptance-criteria). НЕ FAIL: матрица требует '≥2 critical от разных ролей + конфликты НЕРАЗРЕШИМЫ' — критериев два, и второй не выполнен. Все 3 конфликта разрешены прямо в этом ревью через чтение референс-кода (research.js/panel.js/redresearch HANDOFF), а не оставлены открытыми. План фундаментально реализуем: оба самых страшных 'блокера' (§5.1 nesting, state/resume) уже решены в соседнем рабочем скилле и требуют переноса+записи решения, а не изобретения — это понижает реальный риск ниже того, что увидели роли, глядя только на текст плана. Research-обоснование сильное (37 источников, cite 0.96/0.93), архитектура когерентна. Verdict отражает: 'хороший план с дырами в текстовой спецификации контрактов и DoD, но с уже-доказанным инженерным фундаментом — закрыть Decision Record + _shared.md contracts + перенос state-machine из redresearch, и можно строить'. confidence 0.86: высокая, т.к. ключевые технические утверждения проверены по коду, а не приняты на веру; не выше — т.к. сам landing-builder.js ещё не написан и часть рисков (стоимость, concurrency) не имеет эмпирики."
+}
