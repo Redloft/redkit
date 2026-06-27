@@ -17,6 +17,10 @@ redkit/
     plan-panel/         # multi-role верификация плана (redplan)
     finalize/           # stabilize + код-ревью по diff
     redwork/            # ВЕРШИНА: оркестратор полного цикла implement→…→prod
+    redresearch/        # multi-source fact-checked research (+ tiered self-host фетчер)
+    redsemantic/        # SEO-ядро: keyword universe → кластеры → структура
+    redloft/            # idea→ТЗ лендинг-билдер (оркеструет research/semantic/reference)
+    redreference/       # подбор дизайн-референсов с петлёй вкуса
   install.sh
 ```
 Каждый скилл: `lib/<kernel>.sh` — симлинк на `../../../core/<file>` (резолвится и в репо, и после install в `~/.claude/core`). `deps.txt` — runtime-скиллы, которые он вызывает.
@@ -42,4 +46,4 @@ bash ~/.claude/skills/redwork/lib/test-redwork.sh
 Каждый прогон skill-ов пишет методологические находки в `<skill>/feedback/learnings.jsonl` через `core/ledger.sh` (meta-критик). Stop-hook нудит на `solidify` при накоплении. `feedback/` и run-артефакты (`.plan-panel/`, `.finalize/`) — gitignored, не публикуются.
 
 ## Статус
-v1: `core` + `plan-panel` + `finalize` + `redwork` (orchestration tier). Далее (v2): `redresearch`, `redsemantic`, `redloft`, `redreference`.
+Вся red*-семья: `plan-panel`, `finalize`, `redwork`, `redresearch`, `redsemantic`, `redloft`, `redreference` + общий `core`. Сюда консолидированы ранее отдельные `Redloft/redplan` (= plan-panel+finalize) и `Redloft/redfetch` (= tiered-фетчер, живёт в `skills/redresearch/lib/fetch_tiered.py`) — те репы archived в пользу redkit.
