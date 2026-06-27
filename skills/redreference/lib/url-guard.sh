@@ -1,0 +1,1 @@
+../../redresearch/lib/url-guard.sh
