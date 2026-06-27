@@ -1,0 +1,13 @@
+# {{PROJECT_NAME}} — gitignore (methodology kit baseline)
+node_modules/
+.next/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.local
+.DS_Store
+# PII / client materials — never commit (HARD-RULES §F)
+contacts.md
+docs/contacts.md

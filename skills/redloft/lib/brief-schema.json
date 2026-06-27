@@ -1,0 +1,44 @@
+[
+  { "id": "q1_company_name",          "q": 1,  "label": "Название компании",                         "required": true,  "group": "company",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q2_industry",              "q": 2,  "label": "Сфера деятельности",                        "required": true,  "group": "company",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q3_existing_web_social",   "q": 3,  "label": "Адрес сайта / страницы в соцсетях",         "required": false, "group": "company",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q4_current_site_problems", "q": 4,  "label": "Проблемы/недочёты текущего сайта",          "required": false, "group": "company",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q5_brand_assets",          "q": 5,  "label": "Фирменный стиль (брендбук/логотип/...)",    "required": true,  "group": "company",   "branch": null,                                                             "pii": false, "visual": false },
+
+  { "id": "q6_project_description",   "q": 6,  "label": "Описание проекта и задач (бренд/УТП/гео)",  "required": true,  "group": "project",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q7_target_audience",       "q": 7,  "label": "Кто ваш клиент (ЦА, ЛПР)",                  "required": false, "group": "project",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q8_timeline",              "q": 8,  "label": "Планируемые сроки",                         "required": true,  "group": "project",   "branch": null,                                                             "pii": false, "visual": false },
+
+  { "id": "q9_desired_results",       "q": 9,  "label": "Результаты, которых хотите достичь",        "required": true,  "group": "site",      "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q10_site_purpose",         "q": 10, "label": "Назначение и задачи сайта",                 "required": false, "group": "site",      "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q11_competitors",          "q": 11, "label": "Конкуренты (прямые/косвенные)",             "required": true,  "group": "site",      "branch": null,                                                             "pii": false, "visual": true  },
+  { "id": "q12_liked_sites",          "q": 12, "label": "Сайты, которые нравятся (визуально)",       "required": true,  "group": "site",      "branch": null,                                                             "pii": false, "visual": true  },
+
+  { "id": "q13_site_type",            "q": 13, "label": "Какой сайт планируете",                     "required": true,  "group": "type",      "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q14_foreign_versions",     "q": 14, "label": "Иностранные версии сайта",                  "required": true,  "group": "type",      "branch": null,                                                             "pii": false, "visual": false },
+
+  { "id": "q15_offline_points",       "q": 15, "label": "Оффлайн точки продаж и сколько",            "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q16_product_count",        "q": 16, "label": "Количество товаров на сайте",               "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q17_inventory_software",   "q": 17, "label": "ПО/сервис складского учёта",                "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q18_delivery",             "q": 18, "label": "Курьерские службы / доставка",              "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q19_payments",             "q": 19, "label": "Платёжные системы / эквайринг",             "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q20_crm",                  "q": 20, "label": "CRM",                                       "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+  { "id": "q21_ecommerce_functions",  "q": 21, "label": "Функции интернет-магазина",                "required": false, "group": "ecommerce", "branch": { "site_type": "ecommerce" },                                     "pii": false, "visual": false },
+
+  { "id": "q22_sitemap_draft",        "q": 22, "label": "Предварительная карта сайта (меню)",        "required": false, "group": "structure", "branch": { "site_type_in": ["corporate","ecommerce","landing","blog","other"] }, "pii": false, "visual": false },
+  { "id": "q23_key_services",         "q": 23, "label": "Ключевые сервисы (формы, калькулятор...)",  "required": false, "group": "structure", "branch": { "site_type_in": ["corporate","ecommerce","landing","blog","other"] }, "pii": false, "visual": false },
+
+  { "id": "q24_content_types",        "q": 24, "label": "Какая информация будет на сайте",           "required": false, "group": "content",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q25_content_services",     "q": 25, "label": "Нужны ли услуги по контенту",               "required": false, "group": "content",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q26_existing_materials",   "q": 26, "label": "Какие материалы есть (ссылки на облако)",   "required": false, "group": "content",   "branch": null,                                                             "pii": false, "visual": false },
+
+  { "id": "q27_promotion",            "q": 27, "label": "Дальнейшее продвижение (SEO/контекст/...)", "required": true,  "group": "support",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q28_site_support",         "q": 28, "label": "Поддержка сайта (абонемент)",               "required": true,  "group": "support",   "branch": null,                                                             "pii": false, "visual": false },
+  { "id": "q29_clarifications",       "q": 29, "label": "Уточнения по задаче",                       "required": false, "group": "support",   "branch": null,                                                             "pii": false, "visual": false },
+
+  { "id": "q30_name",                 "q": 30, "label": "Ваше имя",                                  "required": true,  "group": "contacts",  "branch": null,                                                             "pii": true,  "visual": false },
+  { "id": "q31_position",             "q": 31, "label": "Должность",                                 "required": true,  "group": "contacts",  "branch": null,                                                             "pii": true,  "visual": false },
+  { "id": "q32_city",                 "q": 32, "label": "Город",                                     "required": true,  "group": "contacts",  "branch": null,                                                             "pii": true,  "visual": false },
+  { "id": "q33_phone",                "q": 33, "label": "Телефон",                                   "required": true,  "group": "contacts",  "branch": null,                                                             "pii": true,  "visual": false },
+  { "id": "q34_referral",             "q": 34, "label": "Откуда о нас узнали",                       "required": true,  "group": "contacts",  "branch": null,                                                             "pii": true,  "visual": false }
+]
