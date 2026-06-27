@@ -1,0 +1,1 @@
+../../../core/strip-secrets.sh

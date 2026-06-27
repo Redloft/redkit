@@ -1,0 +1,6 @@
+# redwork оркеструет (runtime-invoke):
+plan-panel
+finalize
+audit-site   # опц: фронт-аудит в P3
+tracker      # опц: интейк CPMO + эскалация/DONE
+# run, verify — встроенные команды Claude Code, не skills

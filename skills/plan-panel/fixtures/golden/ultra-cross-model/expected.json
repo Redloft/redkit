@@ -1,0 +1,24 @@
+{
+  "expected_complexity": "high",
+  "expected_selected_roles_min": ["scoper", "architect", "qa", "judge", "security"],
+  "expected_selected_roles_must_include": ["security"],
+  "expected_mode": "ultra",
+  "expected_skipped_roles_phase_a": ["frontend", "backend", "data", "ops"],
+  "min_findings_per_role": {
+    "architect": 4,
+    "qa": 4,
+    "security": 4
+  },
+  "expected_verdict": ["NEEDS-WORK", "FAIL"],
+  "max_duration_ms": 360000,
+  "must_mention_in_judge_gaps_or_actions": [
+    "KMS",
+    "refresh",
+    "deprecation",
+    "rate-limit"
+  ],
+  "must_have_meta_judge": true,
+  "expected_cross_model_agreement_min_items": 5,
+  "expected_unique_concerns_from_gpt_or_gemini_min": 3,
+  "notes": "Complex auth migration plan — должен запустить ultra mode с cross-model verify. Должны активироваться все 4 always + security + meta-judge. Несколько skipped (frontend/backend/data/ops в Phase A). Cross-model должен добавить >=3 unique concerns (например encryption-at-rest, session refresh race conditions, OAuth state CSRF). Все 3 модели должны согласиться по основным findings (>=5 items)."
+}

@@ -1,0 +1,11 @@
+# run-артефакты и накопленный feedback — не публикуем
+**/.plan-panel/
+**/.finalize/
+**/runs/
+**/feedback/*.jsonl
+**/feedback/_processed/
+**/roles/_history/*.md
+!**/roles/_history/CHANGELOG.md
+**/.solidify-nudge-state/
+*.tmp
+.DS_Store
