@@ -1,0 +1,19 @@
+{
+  "expected_complexity": "high",
+  "expected_selected_roles_min": ["scoper", "architect", "qa", "judge", "security"],
+  "expected_selected_roles_must_include": ["security"],
+  "expected_skipped_roles_phase_a": ["data"],
+  "min_findings_per_role": {
+    "architect": 3,
+    "qa": 3,
+    "security": 3
+  },
+  "expected_verdict": ["NEEDS-WORK", "FAIL"],
+  "max_duration_ms": 180000,
+  "must_mention_in_judge_gaps_or_actions": [
+    "rollback",
+    "PII",
+    "data"
+  ],
+  "notes": "Schema migration без rollback plan + PII export endpoint + GDPR scope. Security должен поднять PII handling и RLS validation. Architect — reversibility и migration story. QA — что считается valid export, edge case empty user. Data role в Phase A не реализована → judge ОБЯЗАН отметить как gap (это weight критичный для data-migration плана)."
+}

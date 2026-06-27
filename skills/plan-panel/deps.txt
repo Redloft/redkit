@@ -1,0 +1,2 @@
+# runtime-скиллы, которые plan-panel вызывает (кроме core)
+# none — cross-model (GPT-5/Gemini) опционален

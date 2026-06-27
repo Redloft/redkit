@@ -1,0 +1,18 @@
+{
+  "expected_complexity": "medium",
+  "expected_selected_roles_min": ["scoper", "architect", "qa", "judge", "security"],
+  "expected_selected_roles_must_include": ["security"],
+  "min_findings_per_role": {
+    "architect": 2,
+    "qa": 3,
+    "security": 2
+  },
+  "expected_verdict": ["NEEDS-WORK", "FAIL"],
+  "max_duration_ms": 180000,
+  "must_mention_in_judge_gaps_or_actions": [
+    "secrets-mishandling",
+    "rate-limit",
+    "acceptance"
+  ],
+  "notes": "Backend + auth + credentials в .env (нарушение secrets protocol) → security ДОЛЖЕН активироваться и дать critical. Rate-limit in-memory → cluster issue → warning. Без явных DoD на каждый шаг → qa critical. Backend role не реализована в Phase A → judge помечает как gap."
+}

@@ -1,0 +1,13 @@
+{
+  "expected_complexity": "low",
+  "expected_selected_roles_min": ["scoper", "architect", "qa", "judge"],
+  "expected_selected_roles_must_include": [],
+  "min_findings_per_role": {
+    "architect": 0,
+    "qa": 1
+  },
+  "expected_verdict": ["PASS", "NEEDS-WORK"],
+  "max_duration_ms": 90000,
+  "must_mention_in_judge_gaps": [],
+  "notes": "Trivial план — scoper должен вернуть complexity=low. Если есть hint 'предложить пропустить panel' — ОК. Verdict реалистично PASS (нет critical) или NEEDS-WORK (если qa найдёт missing acceptance criteria — что норм для 'When done — returns 200')."
+}
