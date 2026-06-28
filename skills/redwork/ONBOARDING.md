@@ -55,11 +55,15 @@ web-served code-repo. Boundary: out-of-tree + autonomy пока не подде�
 
 Опрос — минимальный: каждый пункт с DETECT-дефолтом подтверждается одним «ок/правь», невыводимое запрашивается явно.
 
-### 3. GENERATE (записать оба представления согласованно)
-- Секция `## redwork` в `CLAUDE.md` (по шаблону ниже) — нарратив из ответов; **обязательно поле «Конфиг-локация»**.
-- `.redwork.json` — машинный (deploy.cmd как **argv-массив**; секреты только `op://`+`$ENV`; smoke полный). **Куда класть — по DETECT config-локации:** in-tree → `<code-repo>/.redwork.json`; **out-of-tree** → в config/governance-репо, redwork получает путь через `REDWORK_CONFIG_FILE` (обязательно для web-served) или `<code-repo>/.redwork-config-ref` (только если корень НЕ публичен). **НИКОГДА** не класть `.redwork.json`/`.redwork-config-ref` в web-served code-repo.
-- `.redwork-autonomy.json` (если автодеплой) — по контракту v2 (DESIGN-autonomy); живёт рядом с `.redwork.json` (тот же config-слой); **owner подписывает коммит**.
-- `.gitignore += .redwork-killswitch`.
+### 3. GENERATE (записать оба представления согласованно — АВТО)
+redwork-init создаёт всё сам (не диктует человеку шаги):
+- **Config-слой по DETECT-локации:**
+  - **in-tree** (не web-served, конфиг принадлежит code-repo) → `<code-repo>/.redwork.json` (+ опц. `.redwork-autonomy.json`).
+  - **out-of-tree** (web-served корень ИЛИ отдельный governance-слой) → АВТО-создать governance-репо `${REDWORK_OPS_DIR:-~/ops}/<project>/` (`git init` если нет), туда `.redwork.json` + `.redwork-autonomy.json` + `REDWORK.md` (полный нарратив — вне web-root). redwork получает путь через `REDWORK_CONFIG_FILE`. **НИКОГДА** не класть конфиг/ref в web-served code-repo (ни `.redwork.json`, ни `.redwork-config-ref`).
+- `.redwork.json` — машинный (deploy.cmd **argv-массив**; секреты только `op://`+`$ENV`; smoke полный).
+- `.redwork-autonomy.json` (если автодеплой) — контракт v2; **`owners` авто-берётся из `git config user.email`** (НЕ угадывать — иначе A0′ author∉owners; урок client-a: git-email ≠ личный gmail) И сверяется с `allowed_signers` (иначе verify-commit не пройдёт → предупредить).
+- **CLAUDE.md код-репо:** in-tree → полная `## redwork`-секция; **web-served → только МИНИМАЛЬНЫЙ непубличный указатель** (config-локация + команда запуска, БЕЗ деталей деплоя/хоста — корень публичен), полный нарратив в governance `REDWORK.md`.
+- `.gitignore += .redwork-killswitch` (в том слое, где живёт конфиг).
 - **🔑 whitelist-gitignore-trap (ledger 2026-06-28):** после записи конфига в его git-слой прогнать `git -C <cfg_top> check-ignore <relpath>` И `git -C <cfg_top> status --short`. Если файл **ignored** (governance-слой часто whitelist-`.gitignore`: `/*`+`/.*` игнорят всё, только `!`-исключения трекаются) → конфиг молча не трекается → integrity упадёт «untracked». Лечение: добавить `!`-исключение в `.gitignore` слоя + предупредить человека (это правка governance-политики, его решение).
 
 ### 4. VERIFY (до коммита)
@@ -71,8 +75,12 @@ web-served code-repo. Boundary: out-of-tree + autonomy пока не подде�
 - `autonomy-gate.sh decide` в **shadow** на пробном диффе → показать решение + объяснение (что человек НЕ катит).
 - консистентность `## redwork` ↔ JSON.
 
-### 5. COMMIT (действие человека)
-Человек ревьюит сгенерированное и **коммитит сам**; `.redwork-autonomy.json` — **подписанным** коммитом (это его pre-approval, authorization-root A0′). redwork НЕ коммитит автономно конфиг автономии.
+### 5. COMMIT (АВТО — подписанный коммит делает redwork-init)
+redwork-init сам делает **подписанный** коммит конфиг-слоя: `git -C <cfg_top> add -A && git commit -S -m "redwork onboarding: ..."`.
+- **Безопасность сохранена:** валидный signed-commit требует ключа owner'а (op-ssh-sign/1Password) → автокоммит ВО ВРЕМЯ init'а, запущенного owner'ом с его ключом, = его pre-approval (A0′ требует именно «контракт подписан ключом owner'а», не «человек вручную набрал git commit»). Запуск `/redwork-init` человеком = авторизация.
+- **Verify-гейт:** после коммита `git -C <cfg_top> verify-commit HEAD` ОБЯЗАН пройти (author∈owners, подпись валидна). Не прошёл (подпись не настроена / email ∉ allowed_signers) → **НЕ включать autonomy** (контракт неверифицируем → гейт всё равно даст human): откатить `autonomy:"disabled"` + сообщить человеку как настроить signing/allowed_signers.
+- Если signing вообще не настроен (нет gpg.format/signingkey) → автокоммит обычный (для `.redwork.json`), но `.redwork-autonomy.json` НЕ создавать (autonomy без подписи бессмысленна) — предложить настроить подпись.
+- Человек по-прежнему может ревьюить артефакты до запуска (init печатает их) и отказаться.
 
 ## Шаблон секции `## redwork` для CLAUDE.md проекта
 ```markdown
