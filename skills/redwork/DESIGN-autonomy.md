@@ -47,6 +47,16 @@ SSH-подписанным коммитом owner'а), блокировка на
 - **A4 (МЕТА-правило):** diff ∩ {autonomy-файл, `.redwork.json`, floor-globs} ≠ ∅ → autonomy VOID → human (нельзя автокатить изменение собственной авторизации/конфига).
 - **A5 (require-блок):** `require:{ rollback_validated:true, prebackup:true|"n/a", prod_health_green:true, watch_minutes:N≥5, signals[], target, supervisor:"systemd"|"launchd"|"cron" }`. Любое false/missing обязательное → human.
 
+## §Out-of-tree authorization (snимает boundary out-of-tree+autonomy)
+Реальный онбординг (web-served code-repo) показал: `.redwork.json`/`.redwork-autonomy.json` нельзя класть в code-repo
+(утечка наружу / отдельный governance-слой). `config.sh` уже резолвит конфиг из out-of-tree слоя (env `REDWORK_CONFIG_FILE`
+→ `.redwork-config-ref` → in-tree), с verified-моделью: single committed-blob read (TOCTOU), integrity в git'е который РЕАЛЬНО
+трекает файл, anti-redirect, symlink/traversal canonicalization, containment. **Autonomy наследует ту же модель:**
+- Гейт резолвит **config-слой** через `config.sh resolve <repo>` → `cfg_top` (governance-git) + `path`. **Autonomy-контракт живёт РЯДОМ** с резолвнутым конфигом: `AF = dirname(path)/.redwork-autonomy.json`, его git = `cfg_top`. In-tree (default) сводится к `cfg_top==repo` — backward-compat.
+- **A0/A0′** (integrity + verified-signed-commit + author∈owners) выполняются в `cfg_top` (не вслепую `$repo`); контент читается ОДИН раз из committed-blob (`git show HEAD:relpath`).
+- **A4 (мета):** floor-проба остаётся на code-repo diff. «Нельзя автокатить изменение собственной авторизации» при out-of-tree **структурно гарантировано**: контракт в ДРУГОМ git'е, его нет в deploy-диффе code-repo → тронуть его деплоем нельзя (безопаснее in-tree, а не слабее). Прежний blanket-fail-closed (`REDWORK_CONFIG_FILE → human`) СНЯТ.
+- Нет config-слоя (`.redwork.json` не резолвится) → autonomy невозможна → human. cfg_top non-git → human.
+
 ## B. Готовность (два независимых сигнала)
 - **B1:** `finalize_pre.verdict==SHIP` И `HEAD==finalize_pre.build_sha` И finalize_pre без high-severity findings.
 - **B2:** `risk-classify`=low (floor hard-block независимо от контракта — E1).

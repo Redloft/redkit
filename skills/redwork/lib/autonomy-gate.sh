@@ -30,7 +30,7 @@ _deploy_count_window(){
 
 decide(){
   local rd="${1:?run_dir}" repo="${2:?repo}" cf="${3:?changed_files_file}"
-  local S="$rd/state.json" AF="$repo/.redwork-autonomy.json"
+  local S="$rd/state.json"
   [ -f "$S" ] || { echo '{"decision":"human","failed":[{"criterion":"infra","detail":"no state.json"}],"passed":[]}'; return 1; }
   [ -f "$cf" ] || { INFRA=1; add_fail infra "no changed_files file"; }
 
@@ -39,26 +39,40 @@ decide(){
     FLOOR_HIT=1; add_fail E1_floor "changed-files задевают floor-glob (migrations/auth/payment/.pem/.key/.env) — всегда человек"
   fi
 
-  # ── A0 integrity ──
+  # ── Резолв authorization-слоя (in-tree | out-of-tree) через verified-resolver config.sh ──
+  # Autonomy-контракт живёт РЯДОМ с резолвнутым .redwork.json; его git = cfg_top (§Out-of-tree authorization).
+  local RES cfgpath cfgtop AF AGIT AF_REL
+  RES="$(bash "$HERE/config.sh" resolve "$repo" 2>/dev/null || true)"
+  cfgpath="$(printf '%s' "$RES" | grep -oE 'path=[^ ]+' | head -1 | cut -d= -f2-)"
+  cfgtop="$(printf '%s' "$RES" | grep -oE 'cfg_top=[^ ]+' | head -1 | cut -d= -f2-)"
+  if [ -n "$cfgpath" ] && [ -n "$cfgtop" ] && [ "$cfgtop" != "(non-git)" ]; then
+    AF="$(dirname "$cfgpath")/.redwork-autonomy.json"; AGIT="$cfgtop"     # контракт рядом с конфигом, в его git
+  else
+    AF="$repo/.redwork-autonomy.json"; AGIT="$repo"                       # in-tree default (нет out-of-tree config-слоя)
+  fi
+  AF_REL="${AF#"$AGIT"/}"
+
+  # ── A0 integrity (в git'е, который РЕАЛЬНО трекает контракт; single committed-blob read = TOCTOU) ──
   local IS_GIT=0
-  if git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then IS_GIT=1; else add_fail A0_integrity "repo не git → autonomy запрещена"; fi
-  if [ ! -f "$AF" ]; then add_fail A0_integrity "нет .redwork-autonomy.json"; fi
+  if git -C "$AGIT" rev-parse --git-dir >/dev/null 2>&1; then IS_GIT=1; else add_fail A0_integrity "config-слой не git ($AGIT) → autonomy запрещена"; fi
+  if [ ! -f "$AF" ]; then add_fail A0_integrity "нет .redwork-autonomy.json (config-слой: $AF)"; fi
   local A='{}'
-  if [ -f "$AF" ]; then
-    if jq -e . "$AF" >/dev/null 2>&1; then A="$(cat "$AF")"; else add_fail A0_integrity ".redwork-autonomy.json не валидный JSON"; fi
-    if [ "$IS_GIT" = 1 ]; then
-      git -C "$repo" ls-files --error-unmatch .redwork-autonomy.json >/dev/null 2>&1 || add_fail A0_integrity "autonomy-файл не git-tracked"
-      git -C "$repo" diff HEAD --quiet -- .redwork-autonomy.json 2>/dev/null || add_fail A0_integrity "autonomy-файл modified/staged (uncommitted)"
-    fi
+  if [ -f "$AF" ] && [ "$IS_GIT" = 1 ]; then
+    git -C "$AGIT" ls-files --error-unmatch "$AF_REL" >/dev/null 2>&1 || add_fail A0_integrity "autonomy-файл не git-tracked в $AGIT"
+    git -C "$AGIT" diff HEAD --quiet -- "$AF_REL" 2>/dev/null || add_fail A0_integrity "autonomy-файл modified/staged в $AGIT"
+    local blob; blob="$(git -C "$AGIT" show "HEAD:$AF_REL" 2>/dev/null)"
+    if printf '%s' "$blob" | jq -e . >/dev/null 2>&1; then A="$blob"; else add_fail A0_integrity ".redwork-autonomy.json (committed) не валидный JSON"; fi
+  elif [ -f "$AF" ]; then
+    jq -e . "$AF" >/dev/null 2>&1 && A="$(cat "$AF")"   # слой не git → A0 уже зафейлен; читаем worktree для прочих критериев
   fi
 
-  # ── A0′ authorization-root: коммит autonomy-файла verified-signed И автор ∈ owners ──
+  # ── A0′ authorization-root: коммит autonomy-файла verified-signed И автор ∈ owners (в AGIT) ──
   if [ -f "$AF" ] && [ "$IS_GIT" = 1 ]; then
-    local last; last="$(git -C "$repo" log -n1 --format=%H -- .redwork-autonomy.json 2>/dev/null)"
+    local last; last="$(git -C "$AGIT" log -n1 --format=%H -- "$AF_REL" 2>/dev/null)"
     if [ -z "$last" ]; then add_fail A0prime_auth "нет коммита, тронувшего autonomy-файл"
     else
-      git -C "$repo" verify-commit "$last" >/dev/null 2>&1 || add_fail A0prime_auth "коммит autonomy-файла НЕ verified-signed (fail-closed)"
-      local author; author="$(git -C "$repo" log -n1 --format=%ae "$last" 2>/dev/null)"
+      git -C "$AGIT" verify-commit "$last" >/dev/null 2>&1 || add_fail A0prime_auth "коммит autonomy-файла НЕ verified-signed (fail-closed)"
+      local author; author="$(git -C "$AGIT" log -n1 --format=%ae "$last" 2>/dev/null)"
       [ "$(_jq "$A" "((.owners // []) | index(\"$author\")) != null")" = "true" ] || add_fail A0prime_auth "автор коммита ($author) ∉ owners[]"
     fi
   fi
@@ -101,12 +115,9 @@ decide(){
   if [ -f "$cf" ] && { grep -qE '(^|/)\.redwork-autonomy\.json$|(^|/)\.redwork\.json$' "$cf" || grep -qiE "$FLOOR_RE" "$cf"; }; then
     add_fail A4_meta "diff трогает autonomy-файл / .redwork.json / floor → autonomy VOID"
   fi
-  # A4 (out-of-tree): при REDWORK_CONFIG_FILE конфиг живёт ВНЕ code-repo → diff code-repo не покажет его
-  # подмену, мета-правило выше слепо к out-of-tree. Fail-closed: out-of-tree config + autonomy = НЕ поддержано
-  # (config.sh §boundary) → всегда human. Снять, когда A4 научится резолвить out-of-tree config-path.
-  if [ -n "${REDWORK_CONFIG_FILE:-}" ]; then
-    add_fail A4_meta "out-of-tree config (REDWORK_CONFIG_FILE) — autonomy не поддержана для out-of-tree (fail-closed → human)"
-  fi
+  # A4 (out-of-tree): контракт в ДРУГОМ git'е (cfg_top), его нет в deploy-диффе code-repo → автокатить его
+  # изменение структурно нельзя (безопаснее in-tree). Floor-проба выше остаётся на code-repo diff.
+  # Прежний blanket fail-closed (REDWORK_CONFIG_FILE→human) СНЯТ — §Out-of-tree authorization.
 
   # ── A5 require-блок ──
   [ "$(_jq "$A" '.require.rollback_validated // false')" = "true" ] || add_fail A5_require "require.rollback_validated != true"
@@ -152,9 +163,9 @@ self_test(){
   out="$(decide "$T/nope" "$repo" "$rd/cf")"; rc=$?; [ "$rc" -eq 1 ]; ok $? "нет state.json → exit 1"
   # 4) decision НИКОГДА не auto без полного валидного контракта (здесь его нет)
   [ "$(printf '%s' "$out" | jq -r '.decision')" = "human" ]; ok $? "без контракта decision=human"
-  # 5) out-of-tree config (REDWORK_CONFIG_FILE) → A4_meta fail-closed
-  out="$( export REDWORK_CONFIG_FILE=/tmp/x.json; decide "$rd" "$repo" "$rd/cf" )"
-  printf '%s' "$out" | jq -e '.failed[]|select(.criterion=="A4_meta" and (.detail|test("out-of-tree")))' >/dev/null; ok $? "out-of-tree config → A4_meta (fail-closed)"
+  # 5) out-of-tree config задан, но недоступен/нет контракта → human (fail-closed, НЕ auto)
+  out="$( export REDWORK_CONFIG_FILE=/tmp/nonexistent-redwork-$$.json; decide "$rd" "$repo" "$rd/cf" )"
+  [ "$(printf '%s' "$out" | jq -r .decision)" = "human" ]; ok $? "out-of-tree без валидного контракта → human (fail-closed)"
   rm -rf "$T"
   if [ "$fail" -eq 0 ]; then echo "✓ autonomy-gate self-test passed"; return 0; else echo "✗ autonomy-gate self-test FAILED"; return 1; fi
 }
