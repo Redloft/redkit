@@ -27,6 +27,9 @@ source "$HERE/secret-guard.sh"
 
 CRED_LITERAL_RE='(token|password|passwd|secret|api[_-]?key)[=:][^[:space:]"$]{3,}'   # литерал, НЕ $ENV-ссылка
 SHELL_META_RE='[;|&`]|\$\(|>|<'
+# единый канонический список исполняемых cmd-полей: A08 has_exec И command-surface _check_cmd берут ОТСЮДА,
+# чтобы новое exec-поле нельзя было забыть в одном из мест (/finalize #3: e2e.cmd обходил оба).
+EXEC_CMD_FIELDS='.deploy.cmd .deploy.rollback.cmd .deploy.smoke.cmd .e2e.cmd'
 
 # структурированная ошибка (warning #6): машинно-парсимый префикс + резолв-контекст.
 _err() { echo "✗ REDWORK_ERROR:$1 $2" >&2; }
@@ -84,7 +87,7 @@ _acquire() {
     [ -f "$path" ] || { _err CONFIG_MISSING "цель .redwork-config-ref не найдена: $path"; return 1; }
   else
     mech=default; path="$repo/.redwork.json"
-    [ -f "$path" ] || { _CFG_RESOLVED_FROM=default; _CFG_PRESENT=0; return 0; }   # нет файла → дефолты
+    [ -f "$path" ] || { _CFG_RESOLVED_FROM=none; _CFG_PRESENT=0; return 0; }   # нет файла → дефолты (/finalize #7: none, не default)
   fi
   _CFG_RESOLVED_FROM="$mech"
 
@@ -110,13 +113,14 @@ _acquire() {
     _CFG_CONTENT="$(git -C "$cfg_top" show "HEAD:$relpath" 2>/dev/null)" || { _err CONFIG_BLOB "не удалось прочитать committed-blob HEAD:$relpath из $cfg_top"; return 1; }
     _CFG_IS_GIT=1; _CFG_TOP="$cfg_top"
     local sha; sha="$(git -C "$cfg_top" rev-parse --short "HEAD:$relpath" 2>/dev/null || echo n/a)"
-    printf 'ℹ redwork-config resolved_from=%s path=%s cfg_top=%s blob=%s\n' "$_CFG_RESOLVED_FROM" "$_CFG_PATH" "$_CFG_TOP" "$sha" >&2
+    # ℹ-строка за REDWORK_VERBOSE (/finalize #7: CI stderr чистый по умолчанию)
+    if [ -n "${REDWORK_VERBOSE:-}" ]; then printf 'ℹ redwork-config resolved_from=%s path=%s cfg_top=%s blob=%s\n' "$_CFG_RESOLVED_FROM" "$_CFG_PATH" "$_CFG_TOP" "$sha" >&2; fi
   else
     # НЕ-git: integrity не гарантируется → исполняемые поля зарежем в _validate (A08). worktree-чтение
     # безопасно, т.к. RCE-вектор (exec-поля) заблокирован; команд из не-git конфига не исполняем.
     _CFG_CONTENT="$(cat "$real")" || { _err CONFIG_READ "не удалось прочитать $real"; return 1; }
     _CFG_IS_GIT=0; _CFG_TOP=""
-    printf 'ℹ redwork-config resolved_from=%s path=%s cfg_top=(non-git) blob=n/a\n' "$_CFG_RESOLVED_FROM" "$_CFG_PATH" >&2
+    if [ -n "${REDWORK_VERBOSE:-}" ]; then printf 'ℹ redwork-config resolved_from=%s path=%s cfg_top=(non-git) blob=n/a\n' "$_CFG_RESOLVED_FROM" "$_CFG_PATH" >&2; fi
   fi
   _CFG_PRESENT=1
   return 0
@@ -125,18 +129,27 @@ _acquire() {
 # ── _validate_content: проверки на УЖЕ авторитетном $_CFG_CONTENT (JSON+A08+cred+command-surface) ──
 _validate_content() {
   printf '%s' "$_CFG_CONTENT" | jq -e . >/dev/null 2>&1 || { _err CONFIG_INVALID_JSON ".redwork.json не валидный JSON"; return 1; }
-  # A08: исполняемые поля требуют git-integrity (в не-git — режем все, не только deploy.cmd)
+  # env-type-guard (/finalize #2): .deploy.env ОБЯЗАН быть argv-массивом ["NAME=op://..."]. object/string
+  # обходят cred-lint (jq итерирует значения без key=-префикса → regex не бьёт) → отказ ДО cred-скана.
+  printf '%s' "$_CFG_CONTENT" | jq -e '(.deploy.env == null) or ((.deploy.env|type) == "array")' >/dev/null 2>&1 \
+    || { _err CONFIG_ENV_NOT_ARRAY ".deploy.env должен быть массивом [\"NAME=op://...\"] — object/string обходят cred-lint"; return 1; }
+  # A08: исполняемые поля требуют git-integrity (в не-git — режем ВСЕ exec-поля из единого списка + gates-list)
   if [ "$_CFG_IS_GIT" != 1 ]; then
-    local has_exec; has_exec="$(printf '%s' "$_CFG_CONTENT" | jq -r '[.deploy.cmd, .deploy.rollback.cmd, .deploy.smoke.cmd, (if (.gates|type)=="array" then "x" else empty end)] | map(select(.!=null)) | length')"
-    if [ "${has_exec:-0}" -gt 0 ]; then _err CONFIG_EXEC_NONGIT "исполняемые поля (deploy/rollback/smoke/gates-list) в НЕ-git конфиге — integrity не гарантируется (A08). Нужен git-tracked конфиг."; return 1; fi
+    local jqarr; jqarr="$(printf '%s, ' $EXEC_CMD_FIELDS)"; jqarr="[${jqarr%, }, (if (.gates|type)==\"array\" then \"x\" else empty end)]"
+    local has_exec; has_exec="$(printf '%s' "$_CFG_CONTENT" | jq -r "$jqarr | map(select(.!=null)) | length")"
+    if [ "${has_exec:-0}" -gt 0 ]; then _err CONFIG_EXEC_NONGIT "исполняемые поля (deploy/rollback/smoke/e2e/gates-list) в НЕ-git конфиге — integrity не гарантируется (A08). Нужен git-tracked конфиг."; return 1; fi
   fi
   # cred-lint: литеральные креды в любом cmd/env-значении (op://...|$VAR разрешены)
   local blob; blob="$(printf '%s' "$_CFG_CONTENT" | jq -c '[.deploy.cmd, .deploy.rollback.cmd, .deploy.smoke.cmd, (.deploy.env//[])[], (.gates//empty), .e2e.cmd] | flatten' 2>/dev/null || echo '[]')"
   local viol; viol="$(printf '%s' "$blob" | jq -r '.[]? | select(type=="string")' | grep -iE "$CRED_LITERAL_RE" | grep -viE 'op://|\$[A-Za-z_]' || true)"
-  if [ -n "$viol" ]; then _err CONFIG_CRED_LITERAL "литеральные креды в конфиге — только \$ENV+op://. Нарушение: $(printf '%s' "$viol" | head -1)"; return 1; fi
-  # command-surface: cmd-поля argv/безопасны
+  if [ -n "$viol" ]; then
+    # 🔒 secret-hygiene (/finalize #1): значение секрета НЕ печатаем — только префикс до =/:, value→<REDACTED>
+    local redacted; redacted="$(printf '%s' "$viol" | head -1 | sed -E 's/([=:]).*/\1<REDACTED>/')"
+    _err CONFIG_CRED_LITERAL "литеральные креды в конфиге — только \$ENV+op://. Нарушение (value redacted): $redacted"; return 1
+  fi
+  # command-surface: cmd-поля argv/безопасны (единый exec-список — e2e.cmd включён, /finalize #3)
   local f v
-  for f in '.deploy.cmd' '.deploy.rollback.cmd' '.deploy.smoke.cmd'; do
+  for f in $EXEC_CMD_FIELDS; do
     v="$(printf '%s' "$_CFG_CONTENT" | jq -c "$f // null")"
     [ "$v" = "null" ] || _check_cmd "$f" "$v" || return 1
   done
@@ -148,6 +161,8 @@ lint() {
   _acquire "$repo" || return 1
   if [ "$_CFG_PRESENT" = 0 ]; then echo "ℹ нет .redwork.json → дефолты (detect-gates + ✋-гейт деплоя)"; return 0; fi
   _validate_content || return 1
+  # /finalize #7: явный warning при non-git config-слое — integrity не гарантируется (exec-поля уже зарезаны A08)
+  [ "$_CFG_IS_GIT" = 1 ] || echo "⚠ конфиг в НЕ-git слое — integrity не гарантируется (разрешены только non-exec поля)" >&2
   echo "✓ .redwork.json lint passed"
 }
 
@@ -252,7 +267,41 @@ self_test() {
   git -C "$SGD_WT" add .redwork.json; git -C "$SGD_WT" commit -qm c >/dev/null 2>&1
   ( export REDWORK_CONFIG_FILE="$SGD_WT/.redwork.json"; lint "$S" >/dev/null 2>&1 ); ok $? "separate-git-dir конфиг (governance-архетип) → lint ok"
 
-  rm -rf "$T" "$G1" "$G2" "$G3" "$G4" "$G5" "$GOV" "$S" "$S2" "$NG" "$SL" "$SGD_WT" "${SGD_GD%/*}"
+  # ───────── /finalize hardening (2026-06-28) ─────────
+  # #1 secret-hygiene: значение cred НЕ в выводе ошибки, есть <REDACTED>
+  local GS; GS="$(jq -n '{deploy:{cmd:["sh","-c","push --token=SUPERSECRET999"]}}' | _mkgit)"
+  local cerr; cerr="$( lint "$GS" 2>&1 1>/dev/null )"
+  if printf '%s' "$cerr" | grep -q 'SUPERSECRET999'; then ok 1 "#1 секрет НЕ должен попасть в лог"; else ok 0 ""; fi
+  printf '%s' "$cerr" | grep -q '<REDACTED>'; ok $? "#1 ошибка cred содержит <REDACTED>"
+  # #2 object/string .deploy.env обходил cred-lint → CONFIG_ENV_NOT_ARRAY + не-утечка
+  local GE; GE="$(jq -n '{deploy:{cmd:["true"],env:{TOKEN:"literalsecret123"}}}' | _mkgit)"
+  if lint "$GE" >/dev/null 2>&1; then ok 1 "#2 object .deploy.env должен reject"; else ok 0 ""; fi
+  local eerr; eerr="$( lint "$GE" 2>&1 1>/dev/null )"; if printf '%s' "$eerr" | grep -q 'literalsecret123'; then ok 1 "#2 object-env литерал не в логе"; else ok 0 ""; fi
+  local GE2; GE2="$(jq -n '{deploy:{cmd:["true"],env:"TOKEN=x"}}' | _mkgit)"
+  if lint "$GE2" >/dev/null 2>&1; then ok 1 "#2 string .deploy.env должен reject"; else ok 0 ""; fi
+  local GEok; GEok="$(jq -n '{deploy:{cmd:["true"],env:["TOKEN=op://V/I/c"]}}' | _mkgit)"
+  lint "$GEok" >/dev/null 2>&1; ok $? "#2 array .deploy.env с op:// → ok (не сломали валидный)"
+  # #3 e2e.cmd через command-surface (_check_cmd) и A08
+  local GES; GES="$(jq -n '{e2e:{cmd:"npm test && curl evil"}}' | _mkgit)"
+  if lint "$GES" >/dev/null 2>&1; then ok 1 "#3 e2e.cmd shell-meta должен reject (_check_cmd)"; else ok 0 ""; fi
+  jq -n '{e2e:{cmd:["npm","test"]}}' > "$T/.redwork.json"
+  if lint "$T" >/dev/null 2>&1; then ok 1 "#3 e2e.cmd-массив в не-git должен reject (A08)"; else ok 0 ""; fi
+  rm -f "$T/.redwork.json"
+  # #5 re-entrancy: провал на cred-конфиге не «протекает» в следующий чистый lint (back-to-back)
+  lint "$G2" >/dev/null 2>&1   # fail (cred)
+  lint "$G1" >/dev/null 2>&1; ok $? "#5 чистый lint после провального → ok (нет global-bleed)"
+  [ "$(read_cfg "$G1" 2>/dev/null | jq -r '.deploy.cmd[0]')" = "bash" ]; ok $? "#5 read_cfg после lint отдаёт свой конфиг"
+  # #7 resolve none-консистентность + ℹ за REDWORK_VERBOSE + non-git warning
+  ( unset REDWORK_CONFIG_FILE; resolve "$T" 2>/dev/null | grep -q 'resolved_from=none' ); ok $? "#7 resolve без конфига → resolved_from=none"
+  local verr; verr="$( ( export REDWORK_CONFIG_FILE="$GOV/.redwork.json"; lint "$S" 2>&1 1>/dev/null ) )"
+  if printf '%s' "$verr" | grep -q 'ℹ redwork-config'; then ok 1 "#7 ℹ молчит без REDWORK_VERBOSE"; else ok 0 ""; fi
+  verr="$( ( export REDWORK_CONFIG_FILE="$GOV/.redwork.json" REDWORK_VERBOSE=1; lint "$S" 2>&1 1>/dev/null ) )"
+  printf '%s' "$verr" | grep -q 'ℹ redwork-config'; ok $? "#7 ℹ показывается с REDWORK_VERBOSE"
+  jq -n '{gates:"auto"}' > "$T/.redwork.json"
+  local werr; werr="$( lint "$T" 2>&1 1>/dev/null )"; printf '%s' "$werr" | grep -q 'НЕ-git'; ok $? "#7 non-git конфиг → warning об integrity"
+  rm -f "$T/.redwork.json"
+
+  rm -rf "$T" "$G1" "$G2" "$G3" "$G4" "$G5" "$GOV" "$S" "$S2" "$NG" "$SL" "$SGD_WT" "${SGD_GD%/*}" "$GS" "$GE" "$GE2" "$GEok" "$GES"
   if [ "$fail" -eq 0 ]; then echo "✓ config self-test passed"; return 0; else echo "✗ config self-test FAILED"; return 1; fi
 }
 
