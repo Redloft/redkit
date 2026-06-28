@@ -60,7 +60,8 @@ escalate() {
 self_test() {
   set +e; export REDWORK_ESCALATE_DRYRUN=1; local T; T="$(mktemp -d)"; local rd="$T/run"; mkdir -p "$rd"; local fail=0
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
-  jq -n '{slug:"s",phase:"P5_deploy",blocked_on:null}' > "$rd/state.json"
+  # фикстура как реальный state.json (schema_version обязателен — state.sh _write требует валидный state-объект)
+  jq -n '{schema_version:1,slug:"s",phase:"P5_deploy",blocked_on:null}' > "$rd/state.json"
   local out; out="$(escalate "$rd" DEPLOY_HIGH_RISK "approve_deploy,review_diff" "high_risk_migration" 2>/dev/null)"
   ok $? "escalate valid"
   printf '%s' "$out" | jq -e '.reason_code=="DEPLOY_HIGH_RISK"' >/dev/null; ok $? "reason_code в payload"
