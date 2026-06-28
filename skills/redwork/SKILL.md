@@ -9,7 +9,7 @@ description: |
   TRIGGER on:
   • «сделай задачу X redwork», «прогони X через redwork», «доведи X до прода сам»
   • «redwork режим 1|2|3 …», "redwork mode 3 …"
-  • Explicit: «/redwork», «/redwork-resume»
+  • Explicit: «/redwork», «/redwork-resume», «/redwork-init» (онбординг проекта)
 allowed-tools: [Bash, Read, Edit, Write, Workflow, Agent, AskUserQuestion]
 ---
 
@@ -26,6 +26,13 @@ Base: `~/.claude/skills/redwork`. Шаренные `strip-secrets.sh`/`ledger.sh
 - **2 мягкий (default)**: авто до dev → ✋ глазки на dev → авто до прод → ✋ апрув прода.
 - **3 автопилот**: всё сам; человек только эскалация-по-сомнению + high-risk деплой.
 - **Эскалация-по-сомнению — всегда** (safety floor): автофикс не сошёлся / неоднозначность / high-risk / не-SHIP.
+
+## Онбординг проекта (ПЕРВЫЙ запуск на проекте — `/redwork-init`)
+redwork адаптируется под каждый проект (dev/prod/ветки/git/деплой/откат). Первый запуск → онбординг (`ONBOARDING.md`):
+DETECT стек+git → INTERVIEW невыводимое (доктрина деплоя) → GENERATE `## redwork`-секцию в **CLAUDE.md проекта** (source of
+truth) + `.redwork.json` + опц. `.redwork-autonomy.json` → VERIFY (lint+rollback+shadow-gate) → человек COMMIT'ит (autonomy —
+подписанным коммитом, A0′). Дальше прогоны читают артефакты, без повторного опроса. На старте обычного `/redwork`: если конфига
+нет → предложить `/redwork-init`; если есть → работать по нему (проверив консистентность `## redwork` ↔ JSON).
 
 ## Старт (`/redwork <задача|CPMO-id|@plan.md> [--repo PATH] [режим N] [--auto-deploy]`)
 ```bash
