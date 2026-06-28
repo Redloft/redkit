@@ -30,6 +30,7 @@ _deploy_count_window(){
 
 decide(){
   local rd="${1:?run_dir}" repo="${2:?repo}" cf="${3:?changed_files_file}"
+  FAILED='[]'; FLOOR_HIT=0; INFRA=0   # /finalize #5: re-entrancy — сброс script-global аккумуляторов на входе
   local S="$rd/state.json"
   [ -f "$S" ] || { echo '{"decision":"human","failed":[{"criterion":"infra","detail":"no state.json"}],"passed":[]}'; return 1; }
   [ -f "$cf" ] || { INFRA=1; add_fail infra "no changed_files file"; }
@@ -118,6 +119,7 @@ decide(){
   # A4 (out-of-tree): контракт в ДРУГОМ git'е (cfg_top), его нет в deploy-диффе code-repo → автокатить его
   # изменение структурно нельзя (безопаснее in-tree). Floor-проба выше остаётся на code-repo diff.
   # Прежний blanket fail-closed (REDWORK_CONFIG_FILE→human) СНЯТ — §Out-of-tree authorization.
+  # /finalize #4/#6 (A4_meta-коллизия + lift-маркер) — moot: тот add_fail("A4_meta") удалён вместе с блоком.
 
   # ── A5 require-блок ──
   [ "$(_jq "$A" '.require.rollback_validated // false')" = "true" ] || add_fail A5_require "require.rollback_validated != true"
@@ -166,6 +168,10 @@ self_test(){
   # 5) out-of-tree config задан, но недоступен/нет контракта → human (fail-closed, НЕ auto)
   out="$( export REDWORK_CONFIG_FILE=/tmp/nonexistent-redwork-$$.json; decide "$rd" "$repo" "$rd/cf" )"
   [ "$(printf '%s' "$out" | jq -r .decision)" = "human" ]; ok $? "out-of-tree без валидного контракта → human (fail-closed)"
+  # 6) re-entrancy (/finalize #5): ПРЯМОЙ (не-subshell) вызов decide после floor НЕ наследует FLOOR_HIT
+  decide "$rd" "$repo" "$rd/cf2" >/dev/null 2>&1   # floor → FLOOR_HIT=1 в этом процессе
+  decide "$rd" "$repo" "$rd/cf"  >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 2 ]; ok $? "re-entrancy: floor НЕ протёк во второй decide (сброс на входе)"
   rm -rf "$T"
   if [ "$fail" -eq 0 ]; then echo "✓ autonomy-gate self-test passed"; return 0; else echo "✗ autonomy-gate self-test FAILED"; return 1; fi
 }
