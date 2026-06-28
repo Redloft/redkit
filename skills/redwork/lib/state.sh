@@ -42,6 +42,10 @@ _write() {  # _write <run_dir> <jq_flag> <argname> <value> <jq_path_expr>
   # tmp РЯДОМ со state.json (та же ФС) → mv атомарен; mktemp в TMPDIR + cross-fs mv не атомарен (Yandex.Disk)
   local tmp; tmp="$(mktemp "${S}.XXXXXX")"
   jq "$flag" "$name" "$val" "$expr" "$S" > "$tmp" || { rm -f "$tmp"; echo "✗ jq write failed" >&2; return 1; }
+  # СТРУКТУРНЫЙ пост-чек: результат обязан остаться объектом со schema_version+slug (catch-all против
+  # любого выражения, давшего не-state JSON). Без него повреждённый jq-expr тихо рушил state.json.
+  jq -e 'type=="object" and has("schema_version") and has("slug")' "$tmp" >/dev/null 2>&1 \
+    || { rm -f "$tmp"; echo "✗ jq-результат — не валидный state-объект (schema_version+slug) → откат, state.json не тронут" >&2; return 1; }
   mv -f "$tmp" "$S"
 }
 
@@ -105,9 +109,13 @@ self_test() {
   # set_json iterations += 1
   _write "$rd" --argjson n 1 '.iterations = $n'; ok $? "set_json iterations"
   [ "$(cmd_get "$rd" '.iterations')" = "1" ]; ok $? "iterations=1"
-  # set_str phase
-  _write "$rd" --arg p "P5_deploy" '.phase = $p'; ok $? "set_str phase"
+  # set_str phase (через публичный диспетчер: argname=val)
+  _write "$rd" --arg val "P5_deploy" '.phase = $val'; ok $? "set_str phase"
   [ "$(cmd_get "$rd" '.phase')" = "P5_deploy" ]; ok $? "phase=P5_deploy"
+  # РЕГРЕССИЯ (баг битого state): читающий фильтр без $val → reject, state.json НЕ перетёрт
+  if _write "$rd" --arg val "P6_postverify" '.phase' 2>/dev/null; then ok 1 "читающий фильтр (.phase) должен reject'иться"; else ok 0 ""; fi
+  [ "$(cmd_get "$rd" '.schema_version')" = "1" ]; ok $? "state.json остался объектом после отказа (не голая строка)"
+  [ "$(cmd_get "$rd" '.phase')" = "P5_deploy" ]; ok $? "phase не изменился после отказа"
   # validate_no_secrets: чистая строка ok, секрет — reject
   validate_no_secrets "just a normal task description"; ok $? "чистая строка проходит"
   # секрет split-литералом чтобы не триггерить хук/push-protection
@@ -124,8 +132,13 @@ case "${1:-}" in
   slug) _slug "${2:?text}" ;;
   init) shift; cmd_init "$@" ;;
   get) cmd_get "${2:-}" "${3:-.}" ;;
-  set_str)  _write "${2:?}" --arg val "${4:?}" "${3:?expr использует \$val}" ;;
-  set_json) _write "${2:?}" --argjson val "${4:?}" "${3:?expr использует \$val}" ;;
+  set_str|set_json)
+    # usage: <run_dir=$2> <jq_path_expr=$3> <value=$4>. Публичный контракт: expr ОБЯЗАН присваивать через $val.
+    # Читающий фильтр (напр. '.phase') заставил бы jq напечатать текущее значение поля и перетереть им
+    # state.json (баг битого state: state.json=="P2_implement").
+    case "${3:?jq_path_expr использует \$val}" in *'$val'*) ;; *) echo "✗ jq-expr не присваивающий (нет \$val): '$3' — отказ" >&2; exit 1 ;; esac
+    if [ "$1" = "set_str" ]; then _write "${2:?}" --arg val "${4:?}" "$3"; else _write "${2:?}" --argjson val "${4:?}" "$3"; fi
+    ;;
   lock) cmd_lock "${2:?}" ;;
   unlock) cmd_unlock "${2:?}" ;;
   validate-no-secrets) validate_no_secrets "${2:-}" ;;
