@@ -11,6 +11,7 @@ run "risk-classify" bash "$HERE/risk-classify.sh" --self-test
 run "escalate"      bash "$HERE/escalate.sh" --self-test
 run "config"        bash "$HERE/config.sh" --self-test
 run "autonomy-gate" bash "$HERE/autonomy-gate.sh" --self-test
+run "onboarding-kb"  bash "$HERE/onboarding-kb.sh" --self-test
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "✅ redwork foundation: ALL self-tests passed"; exit 0

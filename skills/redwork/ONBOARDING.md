@@ -71,6 +71,17 @@ redwork запускается на РАЗНЫХ проектах (разные 
 **Грабли проекта:** <...>.
 ```
 
+## Самообучение: база архетипов проектов (`lib/onboarding-kb.sh`)
+Онбординг — **самообучающийся** (push-петля, как plan-panel/ledger). Каждый успешный init дописывает в локальную базу
+**САНИТИЗИРОВАННЫЙ архетип** проекта; новые онбординги читают её и предлагают дефолты от ПОХОЖИХ → меньше вопросов со временем.
+- **Что хранится:** ТОЛЬКО абстрактный shape — `{stack[](теги), git_flow, deploy_class, cachebust_class, rollback_class, branch_convention(паттерн), mode_default, autonomy}`. Классы — enum (`deploy_class`: ssh-git-ff-only|ssh-rsync|ci-trigger|vercel|…; `cachebust_class`: php-opcache|cdn-purge|asset-hash|…; `rollback_class`: git-reset-prev-sha|ci-rollback|…).
+- 🔒 **Анти-утечка (fail-closed):** `record` ОТВЕРГАЕТ запись, если значение похоже на host/url/ip/path (`://`,`@`,IP,`/path`), есть лишний ключ (где могла бы осесть PII) или класс вне enum. + strip-secrets defense. НИКАКИХ host/path/url/имён/секретов.
+- **Локальность:** база `~/.claude/skills/redwork/knowledge/archetypes.jsonl` — ЛОКАЛЬНА, **НЕ синкается в публичный redkit** (синкается только КОД `onboarding-kb.sh`).
+- **Где в протоколе:**
+  - **Шаг 1 DETECT** дополняется: `onboarding-kb.sh suggest "<stack-теги>"` → modal-дефолты от пересекающихся архетипов («проекты этого типа обычно: deploy=ssh-git-ff-only, rollback=prev-sha, cache=php-opcache, ветки ai/<slug>-prod»).
+  - **Шаг 2 INTERVIEW** пред-заполняется этими дефолтами → человек подтверждает/правит, а не отвечает с нуля. Чем больше проектов онбордено — тем меньше вопросов.
+  - **Шаг 5 (после успешного COMMIT)** → `onboarding-kb.sh record '<sanitized-archetype>'` (push, не pull).
+
 ## Последующие запуски
 redwork на старте: `config.sh lint` + проверка наличия секции `## redwork` + консистентности. Всё есть и согласовано →
 работает по конфигу, БЕЗ повторного опроса. Конфиг отсутствует/рассогласован/`version` autonomy вырос → re-onboard (шаг 2 точечно)
