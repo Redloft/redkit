@@ -87,7 +87,10 @@ decide(){
     [ "${cnt:-0}" -le "${maxf:-0}" ] 2>/dev/null || add_fail A3_inscope "changed count $cnt > max_files $maxf"
   fi
   local cur_branch; cur_branch="$(git -C "$repo" branch --show-current 2>/dev/null || echo '')"
-  [ "$(_jq "$A" "((.scope.branches // []) | index(\"$cur_branch\")) != null")" = "true" ] || add_fail A3_inscope "ветка '$cur_branch' ∉ branches[]"
+  # branches[] — glob-паттерны (конвенция ai/<slug>-prod динамическая → не exact-match)
+  local bmatch=0 b branches; branches="$(_jq "$A" '(.scope.branches // [])[]')"
+  while IFS= read -r b; do [ -z "$b" ] && continue; case "$cur_branch" in $b) bmatch=1; break;; esac; done <<< "$branches"
+  [ "$bmatch" = 1 ] || add_fail A3_inscope "ветка '$cur_branch' ∉ branches[] (glob)"
   [ "$(_jq "$A" '.scope.kill_switch // false')" = "false" ] || add_fail A3_inscope "kill_switch (git-флаг) ON"
   [ -f "$repo/.redwork-killswitch" ] && add_fail A3_inscope "runtime kill-switch (.redwork-killswitch) присутствует"
   local M dcount; M="$(_jq "$A" '.scope.max_deploys_per_window // 0')"; dcount="$(_deploy_count_window "$rd")"
