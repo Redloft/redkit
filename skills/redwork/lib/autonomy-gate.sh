@@ -101,6 +101,12 @@ decide(){
   if [ -f "$cf" ] && { grep -qE '(^|/)\.redwork-autonomy\.json$|(^|/)\.redwork\.json$' "$cf" || grep -qiE "$FLOOR_RE" "$cf"; }; then
     add_fail A4_meta "diff трогает autonomy-файл / .redwork.json / floor → autonomy VOID"
   fi
+  # A4 (out-of-tree): при REDWORK_CONFIG_FILE конфиг живёт ВНЕ code-repo → diff code-repo не покажет его
+  # подмену, мета-правило выше слепо к out-of-tree. Fail-closed: out-of-tree config + autonomy = НЕ поддержано
+  # (config.sh §boundary) → всегда human. Снять, когда A4 научится резолвить out-of-tree config-path.
+  if [ -n "${REDWORK_CONFIG_FILE:-}" ]; then
+    add_fail A4_meta "out-of-tree config (REDWORK_CONFIG_FILE) — autonomy не поддержана для out-of-tree (fail-closed → human)"
+  fi
 
   # ── A5 require-блок ──
   [ "$(_jq "$A" '.require.rollback_validated // false')" = "true" ] || add_fail A5_require "require.rollback_validated != true"
@@ -146,6 +152,9 @@ self_test(){
   out="$(decide "$T/nope" "$repo" "$rd/cf")"; rc=$?; [ "$rc" -eq 1 ]; ok $? "нет state.json → exit 1"
   # 4) decision НИКОГДА не auto без полного валидного контракта (здесь его нет)
   [ "$(printf '%s' "$out" | jq -r '.decision')" = "human" ]; ok $? "без контракта decision=human"
+  # 5) out-of-tree config (REDWORK_CONFIG_FILE) → A4_meta fail-closed
+  out="$( export REDWORK_CONFIG_FILE=/tmp/x.json; decide "$rd" "$repo" "$rd/cf" )"
+  printf '%s' "$out" | jq -e '.failed[]|select(.criterion=="A4_meta" and (.detail|test("out-of-tree")))' >/dev/null; ok $? "out-of-tree config → A4_meta (fail-closed)"
   rm -rf "$T"
   if [ "$fail" -eq 0 ]; then echo "✓ autonomy-gate self-test passed"; return 0; else echo "✗ autonomy-gate self-test FAILED"; return 1; fi
 }

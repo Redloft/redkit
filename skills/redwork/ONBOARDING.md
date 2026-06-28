@@ -21,6 +21,18 @@ redwork запускается на РАЗНЫХ проектах (разные 
 <repo>/.gitignore           → += .redwork-killswitch (runtime-флаг, НЕ коммитится)
 ```
 
+### ⚠️ Out-of-tree config (web-served / многослойные git-проекты)
+Если **корень code-repo раздаётся публично** (web-root отдаёт dotfiles: `GET https://site/.redwork.json`→200) или
+конфиг/деплой-механика живут в ОТДЕЛЬНОМ git-слое (governance-репо, НЕ деплоится) — `.redwork.json` в code-repo
+**раскрыл бы деплой-механику наружу** (argv, `op://`-имена, SSH-хост). Тогда конфиг кладётся **вне code-repo**, в его
+собственный git-tracked слой, а redwork получает путь через:
+- **env `REDWORK_CONFIG_FILE=<abs>`** (предпочтительно для web-served: НИЧЕГО не оседает в деплой-дереве), или
+- **`<repo>/.redwork-config-ref`** (1 строка = путь; tracked+unmodified в code-repo) — для проектов, где корень НЕ
+  публичен. ⚠️ для web-served репо ref НЕЛЬЗЯ (сам ref уедет в public_html).
+Integrity (tracked+unmodified) применяется к РЕЗОЛВНУТОМУ файлу в ЕГО git; single-read из committed-blob; symlink/
+traversal зарезаны (`config.sh` §OUT-OF-TREE). **НИКОГДА** не коммить `.redwork.json`/`.redwork-config-ref` в
+web-served code-repo. Boundary: out-of-tree + autonomy пока не поддержаны (autonomy-gate A4 fail-closed → human).
+
 ## Протокол `/redwork-init` (первый запуск на проекте)
 Идемпотентен: если артефакты есть и согласованы — no-op (печатает summary). Иначе 5 шагов.
 
@@ -29,7 +41,9 @@ redwork запускается на РАЗНЫХ проектах (разные 
 - **Стек/гейты:** `package.json`(scripts: lint/test/build; biome/eslint/vite/tsc) · `composer.json`(php) · `requirements.txt`/`pyproject`(pytest) · `Makefile` · `*.csproj` → черновик `gates`.
 - **Git:** remote, default-branch, существующие ветки/конвенции, есть ли подписанные коммиты (для A0′).
 - **Прод-следы:** CI-конфиги (`.github/workflows`, codemagic), `Dockerfile`, `nginx`-конфиги, deploy-скрипты в репо.
-Результат — **черновик** конфига с заполненным тем, что выводимо.
+- **🔑 Repo-layout (КРИТИЧНО — иначе «5-минутный config-write» уезжает в duty-сессию; ledger 2026-06-28):** НЕ считать репо единым местом. Классифицировать git-слои: **code-repo** (деплоится) vs **config/governance** (деплой-механика, НЕ деплоится) vs **deploy-target** (прод-хост). Если конфиг/деплой-механика логически НЕ принадлежат code-repo → ветка **out-of-tree** (§Out-of-tree), НЕ класть `.redwork.json` в code-repo. Сигналы слоя: отдельный governance-репо рядом, separate-git-dir, монорепо-слои.
+- **🔑 Web-served-root (КРИТИЧНО):** если есть прод-URL И корень code-repo похож на web-root (`index.php`/`.htaccess`/urlrewrite/`public_html`-чекаут) → проба `curl -s -o /dev/null -w '%{http_code}' https://<prod>/.gitignore`. **200 → корень публичен → out-of-tree ОБЯЗАТЕЛЕН**, ref-файл в code-repo ЗАПРЕЩЁН (только `REDWORK_CONFIG_FILE` env; иначе сам `.redwork.json`/`.redwork-config-ref` утечёт: `GET https://site/.redwork.json` отдаст argv деплоя + `op://`-имена + SSH-хост).
+Результат — **черновик** конфига + **config-локация** (in-tree | out-of-tree env | out-of-tree ref) с заполненным тем, что выводимо.
 
 ### 2. INTERVIEW (спросить человека ОДИН раз — только невыводимое)
 Структурированный опрос, ответы → в проект НАВСЕГДА (не переспрашиваем):
@@ -42,13 +56,17 @@ redwork запускается на РАЗНЫХ проектах (разные 
 Опрос — минимальный: каждый пункт с DETECT-дефолтом подтверждается одним «ок/правь», невыводимое запрашивается явно.
 
 ### 3. GENERATE (записать оба представления согласованно)
-- Секция `## redwork` в `CLAUDE.md` (по шаблону ниже) — нарратив из ответов.
-- `.redwork.json` — машинный (deploy.cmd как **argv-массив**; секреты только `op://`+`$ENV`; smoke полный).
-- `.redwork-autonomy.json` (если автодеплой) — по контракту v2 (DESIGN-autonomy); **owner подписывает коммит**.
+- Секция `## redwork` в `CLAUDE.md` (по шаблону ниже) — нарратив из ответов; **обязательно поле «Конфиг-локация»**.
+- `.redwork.json` — машинный (deploy.cmd как **argv-массив**; секреты только `op://`+`$ENV`; smoke полный). **Куда класть — по DETECT config-локации:** in-tree → `<code-repo>/.redwork.json`; **out-of-tree** → в config/governance-репо, redwork получает путь через `REDWORK_CONFIG_FILE` (обязательно для web-served) или `<code-repo>/.redwork-config-ref` (только если корень НЕ публичен). **НИКОГДА** не класть `.redwork.json`/`.redwork-config-ref` в web-served code-repo.
+- `.redwork-autonomy.json` (если автодеплой) — по контракту v2 (DESIGN-autonomy); живёт рядом с `.redwork.json` (тот же config-слой); **owner подписывает коммит**.
 - `.gitignore += .redwork-killswitch`.
+- **🔑 whitelist-gitignore-trap (ledger 2026-06-28):** после записи конфига в его git-слой прогнать `git -C <cfg_top> check-ignore <relpath>` И `git -C <cfg_top> status --short`. Если файл **ignored** (governance-слой часто whitelist-`.gitignore`: `/*`+`/.*` игнорят всё, только `!`-исключения трекаются) → конфиг молча не трекается → integrity упадёт «untracked». Лечение: добавить `!`-исключение в `.gitignore` слоя + предупредить человека (это правка governance-политики, его решение).
 
 ### 4. VERIFY (до коммита)
 - `config.sh lint <repo>` — argv/cred-lint/git-integrity.
+- `config.sh resolve <repo>` — для out-of-tree: подтвердить, что конфиг резолвится из ОЖИДАЕМОГО слоя (resolved_from/path/cfg_top), а не случайно из code-repo. Drift-check: при последующих запусках это же проверяется на старте.
+- **🔑 не-утечка (web-served):** если DETECT отметил web-served-root → `curl -s -o /dev/null -w '%{http_code}' https://<prod>/.redwork.json` И `/.redwork-config-ref` → ОБА не-200 (404/403). 200 → конфиг наружу, СТОП (вернуть в out-of-tree).
+- **🔑 реально трекается:** `git -C <cfg_top> check-ignore <relpath>` пусто (не ignored) И `ls-files` находит файл (закрывает whitelist-gitignore-trap до коммита).
 - rollback-валидация (dry-run / наличие prev-good-SHA).
 - `autonomy-gate.sh decide` в **shadow** на пробном диффе → показать решение + объяснение (что человек НЕ катит).
 - консистентность `## redwork` ↔ JSON.
@@ -64,6 +82,7 @@ redwork запускается на РАЗНЫХ проектах (разные 
 **Ветки:** dev=`<...>`; прод-конвенция=`<ai/<slug>-prod>`; мерж в прод: <ff-only по SSH>; кто апрувит: <...>.
 **Деплой (ритуал):** <человеческое описание: куда, чем, как cache-bust/opcache>.
   Машинно: `.redwork.json` → deploy.cmd (argv), env (op://), smoke, rollback.
+**Конфиг-локация:** `<in-tree .redwork.json | out-of-tree: REDWORK_CONFIG_FILE=<abs> | .redwork-config-ref>` (см. §Out-of-tree).
 **Прод:** URL `<...>`; health `<...>`; smoke-маркер `<статус + строка>`.
 **Откат:** <механизм + как валидируется ДО деплоя>.
 **Режим по умолчанию:** <1|2|3>. **Автодеплой:** <нет | да — см. `.redwork-autonomy.json`, scope=<...>>.
