@@ -22,6 +22,7 @@ redkit/
     redloft/            # idea→ТЗ лендинг-билдер (оркеструет research/semantic/reference)
     redreference/       # подбор дизайн-референсов с петлёй вкуса
     redjob/             # дежурный оператор launchd/cron джоб (standalone, без core-dep)
+    redbrain/           # граф-память: SQLite-граф + темпоральные слои (standalone, без core-dep)
   install.sh
 ```
 Каждый скилл: `lib/<kernel>.sh` — симлинк на `../../../core/<file>` (резолвится и в репо, и после install в `~/.claude/core`). `deps.txt` — runtime-скиллы, которые он вызывает.
@@ -47,4 +48,4 @@ bash ~/.claude/skills/redwork/lib/test-redwork.sh
 Каждый прогон skill-ов пишет методологические находки в `<skill>/feedback/learnings.jsonl` через `core/ledger.sh` (meta-критик). Stop-hook нудит на `solidify` при накоплении. `feedback/` и run-артефакты (`.plan-panel/`, `.finalize/`) — gitignored, не публикуются.
 
 ## Статус
-Вся red*-семья: `plan-panel`, `finalize`, `redwork`, `redresearch`, `redsemantic`, `redloft`, `redreference` + общий `core`. Сюда консолидированы ранее отдельные `Redloft/redplan` (= plan-panel+finalize) и `Redloft/redfetch` (= tiered-фетчер, живёт в `skills/redresearch/lib/fetch_tiered.py`) — те репы archived в пользу redkit.
+Вся red*-семья: `plan-panel`, `finalize`, `redwork`, `redresearch`, `redsemantic`, `redloft`, `redreference`, `redjob`, `redbrain` + общий `core`. Сюда консолидированы ранее отдельные `Redloft/redplan` (= plan-panel+finalize) и `Redloft/redfetch` (= tiered-фетчер, живёт в `skills/redresearch/lib/fetch_tiered.py`) — те репы archived в пользу redkit.

@@ -1,0 +1,110 @@
+{
+ "comment": "Golden query-set = DoD Phase 1 (решение plan-panel: success-signal — retrieval, не 'экстракция прошла'). Каждый запрос: search/entity/context по имени → ожидаемый документ(ы) в результатах. Прогон: lib/golden.sh. Порог приёмки: >= 12/15 pass.",
+ "queries": [
+  {
+   "id": 1,
+   "cmd": "docs",
+   "arg": "fable",
+   "expect_doc_contains": "fable-in-skills"
+  },
+  {
+   "id": 2,
+   "cmd": "docs",
+   "arg": "redkit",
+   "expect_doc_contains": "redkit-repo"
+  },
+  {
+   "id": 3,
+   "cmd": "docs",
+   "arg": "telegram",
+   "expect_doc_contains": "redcontrol-tg-digest"
+  },
+  {
+   "id": 4,
+   "cmd": "docs",
+   "arg": "1password",
+   "expect_doc_contains": "secrets-shell-only"
+  },
+  {
+   "id": 5,
+   "cmd": "docs",
+   "arg": "диадок",
+   "expect_doc_contains": "red-edo-skill"
+  },
+  {
+   "id": 6,
+   "cmd": "docs",
+   "arg": "wordstat",
+   "expect_doc_contains": "redsemantic-skill"
+  },
+  {
+   "id": 7,
+   "cmd": "docs",
+   "arg": "gemini tts",
+   "expect_doc_contains": "audiocast-skill"
+  },
+  {
+   "id": 8,
+   "cmd": "docs",
+   "arg": "beget",
+   "expect_doc_contains": "skillsru-catalog-site"
+  },
+  {
+   "id": 9,
+   "cmd": "docs",
+   "arg": "hetzner",
+   "expect_doc_contains": "geo-edge-pattern"
+  },
+  {
+   "id": 10,
+   "cmd": "docs",
+   "arg": "трекер",
+   "expect_doc_contains": "tracker-integration"
+  },
+  {
+   "id": 11,
+   "cmd": "docs",
+   "arg": "cloakbrowser",
+   "expect_doc_contains": "tiered-fetch-adapter"
+  },
+  {
+   "id": 12,
+   "cmd": "docs",
+   "arg": "инн",
+   "expect_doc_contains": "red-accountant-project-linking"
+  },
+  {
+   "id": 13,
+   "cmd": "context",
+   "arg": "redplan",
+   "expect_doc_contains": "redplan",
+   "note": "окрестность redplan должна тянуть >=2 redplan-дока"
+  },
+  {
+   "id": 14,
+   "cmd": "docs",
+   "arg": "stitch",
+   "expect_doc_contains": "stitch-mcp-setup"
+  },
+  {
+   "id": 15,
+   "cmd": "docs",
+   "arg": "ffmpeg",
+   "expect_doc_contains": "content-screencast-branch"
+  },
+  {
+   "id": "T1",
+   "cmd": "asof",
+   "arg": "2026-07-07",
+   "expect_doc_contains": "located_in",
+   "note": "temporal: презентный срез отдаёт интервальные факты"
+  },
+  {
+   "id": "T2",
+   "cmd": "docs",
+   "arg": "plaud",
+   "expect_doc_contains": "plaud-riffado-bridge",
+   "note": "temporal: дефолтный фильтр confirmed не ломает старые чтения"
+  }
+ ]
+}
