@@ -1,0 +1,9 @@
+# реальный реестр = карта личного парка, НЕ коммитим (генерится `redjob seed --write`)
+jobs.yaml
+*.lock
+.jobs.*.tmp
+tests/golden/*.txt
+__pycache__/
+*.pyc
+.plan-panel/
+.finalize/

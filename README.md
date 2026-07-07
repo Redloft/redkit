@@ -21,6 +21,7 @@ redkit/
     redsemantic/        # SEO-ядро: keyword universe → кластеры → структура
     redloft/            # idea→ТЗ лендинг-билдер (оркеструет research/semantic/reference)
     redreference/       # подбор дизайн-референсов с петлёй вкуса
+    redjob/             # дежурный оператор launchd/cron джоб (standalone, без core-dep)
   install.sh
 ```
 Каждый скилл: `lib/<kernel>.sh` — симлинк на `../../../core/<file>` (резолвится и в репо, и после install в `~/.claude/core`). `deps.txt` — runtime-скиллы, которые он вызывает.

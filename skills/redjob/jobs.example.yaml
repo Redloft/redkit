@@ -1,0 +1,54 @@
+# redjob реестр — ПРИМЕР. Реальный jobs.yaml генерируется на твоей машине
+# командой `redjob seed --write` (сканит ~/Library/LaunchAgents) и в git не коммитится
+# (см. .gitignore) — это карта того, что бегает лично у тебя.
+schema_version: 1
+jobs:
+- label: com.example.nightly
+  project: example
+  kind: calendar
+  schedule:
+    human: '* 04:30'
+    calendar:
+    - hour: 4
+      minute: 30
+      weekday: null
+  plist: /Users/you/Library/LaunchAgents/com.example.nightly.plist
+  script: /Users/you/scripts/nightly.sh
+  interpreter: /bin/bash
+  deps_bins:
+  - jq
+  - curl
+  auth: none
+  locks: []
+  weight: light
+  env_required:
+  - PATH
+  logs:
+    out: /Users/you/.cache/example/nightly.out.log
+    err: /Users/you/.cache/example/nightly.err.log
+  status: active
+  notes: Пример calendar-джобы.
+- label: com.example.sync
+  project: example
+  kind: interval
+  schedule:
+    human: каждые 1ч
+    interval_sec: 3600
+  plist: /Users/you/Library/LaunchAgents/com.example.sync.plist
+  script: /Users/you/scripts/sync.sh
+  interpreter: /bin/bash
+  deps_bins:
+  - sqlite3
+  auth: none
+  locks:
+  - example-db
+  weight: light
+  env_required: []
+  status: active
+  notes: Пример interval-джобы, делящей БД-lock.
+- label: homebrew.mxcl.postgresql
+  project: external
+  kind: keepalive
+  plist: /Users/you/Library/LaunchAgents/homebrew.mxcl.postgresql.plist
+  status: external
+  notes: Сторонний агент — наблюдается в drift, без проверок.
