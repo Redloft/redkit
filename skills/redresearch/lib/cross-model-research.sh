@@ -11,6 +11,8 @@
 # Секреты: OPENAI_API_KEY + GEMINI_API_KEY инъектятся через op run (self-wrap ниже).
 # НИКОГДА не печатать значения. Без curl -v / 2>&1 (Authorization header в base64
 # тривиально декодируется — см. CLAUDE.md secrets protocol).
+# GEMINI_PROXY: Gemini geo-блокирует RU IP → если не задан, автоопределяется SOCKS5 на
+#   127.0.0.1:1080. Таймауты: GPT_MAX_TIME=300с / GEM_MAX_TIME=180с (env-override). См. cross-model.sh.
 set -euo pipefail
 
 TOPIC_FILE="${1:?usage: cross-model-research.sh <topic> <report> <sources>}"
@@ -25,14 +27,40 @@ for var in TOPIC_FILE REPORT_FILE SOURCES_FILE; do
   fi
 done
 
-# curl hardening — DRY (identical to cross-model.sh)
+# curl hardening — DRY (identical to cross-model.sh). --max-time вынесен per-leg ниже:
+# GPT-5 на объёмных research-отчётах отвечает >120с (см. cross-model.sh, run 2026-07-06).
 CURL_OPTS=(
-  --silent --show-error --max-time 120
+  --silent --show-error
   --fail-with-body
   --proto '=https' --tlsv1.2
 )
 
+# Per-leg curl timeouts (сек). GPT-5 медленнее на больших промптах; Gemini — через SOCKS5 proxy.
+GPT_MAX_TIME="${GPT_MAX_TIME:-300}"
+GEM_MAX_TIME="${GEM_MAX_TIME:-180}"
+
+# ─── Gemini geo-block workaround ───
+# Gemini geo-блокирует RU IP (оба auth-пути — и ?key=, и x-goog-api-key header — дают live 400
+# FAILED_PRECONDITION, проверено 2026-07-06). Если GEMINI_PROXY не задан — автоопределяем локальный
+# SOCKS5 на 127.0.0.1:1080 (ssh -D). "не задан" → автодетект; "" → принудительно без прокси
+# (${VAR+set}: асимметрия с GPT_MAX_TIME/GEM_MAX_TIME, где ""==unset→default). Допущение:
+# GEMINI_PROXY = socks5://host:port БЕЗ embedded-credentials (уходит в curl argv).
+# export → значение переживает self-wrap re-exec (op run пробрасывает env в child).
+# Диагностика в stderr (НЕ stdout — там JSON): nc-absent / tunnel-down / detected, иначе
+# упавший `ssh -D 1080` даёт немой 400, неотличимый от «прокси не нужен».
+# Прокси-автодетект (FI → локальный 1080 → прямой) — единая функция в fi-proxy.sh.
+# helper-missing: уважаем явный GEMINI_PROXY, иначе прямой (1080-фолбэк живёт внутри функции,
+# т.е. доступен только при наличии helper'а — осознанное сужение сломанной-установки edge).
+_GFI=~/.claude/skills/_shared/gemini-fi/fi-proxy.sh
+if [ -f "$_GFI" ] && source "$_GFI"; then
+  gemini_fi_autodetect_proxy "cross-model-research"
+else
+  : "${GEMINI_PROXY=}"; export GEMINI_PROXY
+fi
+
 # Self-wrap если env не выставлен (один op call на оба провайдера; секрет только в child env)
+# GLM протестирован как 3-й голос (mini-A/B 2026-07-03) → ОТКЛОНЁН (B): дубль gpt+gemini на
+# research-отчётах (overlap 87%, unique-real 0.5/отчёт, вклад = рантайм не по профилю). Пара gpt+gemini.
 if [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${GEMINI_API_KEY:-}" ]; then
   exec op run --env-file=<(cat <<'EOF'
 OPENAI_API_KEY=op://AI-Tokens/OpenAI/credential
@@ -44,6 +72,27 @@ fi
 TOPIC=$(cat "$TOPIC_FILE")
 REPORT=$(cat "$REPORT_FILE")
 SOURCES=$(cat "$SOURCES_FILE")
+
+# ─── PRIVACY BARRIER (#3) ───────────────────────────────────────────
+# report+sources+topic уходят во ВНЕШНИЕ модели (OpenAI US / Google) — тот же
+# fail-closed scrub, что в plan-panel/finalize. Маскирует секреты/инфру, БЛОКИРУЕТ
+# ИНН/реквизиты/EJ_SENSITIVE. Переиспользуем _shared/external-judge/scrub.sh.
+SCRUB="$HOME/.claude/skills/_shared/external-judge/scrub.sh"
+if [ ! -f "$SCRUB" ]; then
+  printf '{"error":"scrub-missing","note":"privacy scrubber not found; fail-closed, nothing sent to external models"}\n'; exit 0
+fi
+run_scrub() { printf '%s' "$1" | bash "$SCRUB" 2>/dev/null; }
+rc_max=0
+S_TOPIC="$(run_scrub "$TOPIC")"     || rc_max=$?
+S_REPORT="$(run_scrub "$REPORT")"   || { r=$?; [ "$r" -gt "$rc_max" ] && rc_max=$r; }
+S_SOURCES="$(run_scrub "$SOURCES")" || { r=$?; [ "$r" -gt "$rc_max" ] && rc_max=$r; }
+if [ "$rc_max" -eq 20 ]; then
+  printf '{"error":"denylist-block","note":"research payload matched denylist (ИНН/реквизиты/sensitive) — НЕ отправлено во внешние модели"}\n'; exit 0
+elif [ "$rc_max" -ne 0 ]; then
+  printf '{"error":"scrub-failed","note":"privacy scrub engine failed — fail-closed, ничего не отправлено"}\n'; exit 0
+fi
+TOPIC="$S_TOPIC"; REPORT="$S_REPORT"; SOURCES="$S_SOURCES"
+# ────────────────────────────────────────────────────────────────────
 
 # Одинаковый промпт обеим моделям — честный cross-check
 PROMPT="Ты — senior independent research reviewer. Тебе показывают research-отчёт,
@@ -92,7 +141,7 @@ call_gpt() {
     response_format: {type:"json_object"}
   }')
   local http
-  http=$(curl "${CURL_OPTS[@]}" -o "$GPT_OUT" -w "%{http_code}" \
+  http=$(curl "${CURL_OPTS[@]}" --max-time "$GPT_MAX_TIME" -o "$GPT_OUT" -w "%{http_code}" \
     -H "Authorization: Bearer $OPENAI_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$payload" \
@@ -112,10 +161,12 @@ call_gemini() {
     proxy_arg=(--socks5-hostname "$target")
   fi
   local http
-  http=$(curl "${CURL_OPTS[@]}" "${proxy_arg[@]}" -o "$GEM_OUT" -w "%{http_code}" \
+  # секрет-гигиена: ключ в заголовке x-goog-api-key, НЕ в URL (?key= виден в ps/логах прокси)
+  http=$(curl "${CURL_OPTS[@]}" --max-time "$GEM_MAX_TIME" "${proxy_arg[@]}" -o "$GEM_OUT" -w "%{http_code}" \
     -H "Content-Type: application/json" \
+    -H "x-goog-api-key: $GEMINI_API_KEY" \
     -d "$payload" \
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=$GEMINI_API_KEY" || true)
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent" || true)
   printf '%s\n' "$http" > "$GEM_META"
 }
 
