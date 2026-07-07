@@ -7,7 +7,12 @@
 #
 # Выход: JSON { gpt: {...}, gemini: {...}, errors: [...], cost_estimate_usd: number }
 #
-# Требует op run снаружи с OPENAI_API_KEY + GEMINI_API_KEY + GEMINI_PROXY (SOCKS5 на macOS).
+# Секреты: скрипт self-wrap'ит через `op run` (items OpenAI + Gemini), если env не выставлен.
+# GEMINI_PROXY: Gemini geo-блокирует RU IP. Если НЕ задан — автоопределяется локальный
+#   SOCKS5-туннель на 127.0.0.1:1080 (напр. `ssh -D 1080 <server>`). Переопределяемо:
+#   GEMINI_PROXY=socks5://host:port. GEMINI_PROXY="" (явно пустой) отключает прокси принудительно.
+# Таймауты curl: GPT_MAX_TIME (по умолч. 300с — GPT-5 на объёмных промптах отвечает >120с),
+#   GEM_MAX_TIME (180с). Оба переопределяемы через env.
 set -euo pipefail
 
 PLAN_FILE="${1:?usage: cross-model.sh <plan> <judge> <reviews>}"
@@ -23,14 +28,42 @@ for var in PLAN_FILE JUDGE_FILE REVIEWS_FILE; do
   fi
 done
 
-# curl hardening flags — DRY константа
+# curl hardening flags — DRY константа. --max-time НЕ здесь: задаётся per-leg ниже,
+# т.к. GPT-5 на объёмных промптах (~57KB → 151.8с на run 2026-07-06) не укладывался в 120с.
 CURL_OPTS=(
-  --silent --show-error --max-time 120
+  --silent --show-error
   --fail-with-body
   --proto '=https' --tlsv1.2
 )
 
-# Self-wrap если env не выставлен (один Touch ID/op call на оба провайдера)
+# Per-leg curl timeouts (сек). GPT-5 медленнее на больших промптах — даём запас;
+# Gemini идёт через SOCKS5 proxy (доп. латентность). Оба переопределяемы через env.
+GPT_MAX_TIME="${GPT_MAX_TIME:-300}"
+GEM_MAX_TIME="${GEM_MAX_TIME:-180}"
+
+# ─── Gemini geo-block workaround ───
+# Gemini API geo-блокирует RU IP. Приоритет: явный GEMINI_PROXY > автоопределение
+# локального SOCKS5-туннеля на 127.0.0.1:1080. Различаем "не задан" (→ автодетект)
+# и "задан пустым" (→ принудительно без прокси) через ${VAR+set}. ВНИМАНИЕ: асимметрия
+# с GPT_MAX_TIME/GEM_MAX_TIME выше — те через :-default, где ""==unset (тоже даёт default);
+# здесь ""≠unset (пустое уважается). Допущение: GEMINI_PROXY = чистый socks5://host:port
+# БЕЗ embedded-credentials (уходит в curl argv, виден в ps).
+# export → значение переживает self-wrap ниже (op run пробрасывает env в child-процесс).
+# Диагностика в stderr (НЕ stdout — там JSON): различить nc-absent / tunnel-down / detected,
+# иначе упавший `ssh -D 1080` даёт немой 400 FAILED_PRECONDITION, неотличимый от «прокси не нужен».
+# Прокси-автодетект (FI → локальный 1080 → прямой) — единая функция в fi-proxy.sh.
+# helper-missing: уважаем явный GEMINI_PROXY, иначе прямой (1080-фолбэк живёт внутри функции,
+# т.е. доступен только при наличии helper'а — осознанное сужение сломанной-установки edge).
+_GFI=~/.claude/skills/_shared/gemini-fi/fi-proxy.sh
+if [ -f "$_GFI" ] && source "$_GFI"; then
+  gemini_fi_autodetect_proxy "cross-model"
+else
+  : "${GEMINI_PROXY=}"; export GEMINI_PROXY
+fi
+
+# Self-wrap если env-секреты не выставлены (один Touch ID/op call на оба провайдера).
+# op run пробрасывает существующий env (вкл. экспортированный GEMINI_PROXY) в child +
+# инъектит секреты из env-file — поэтому прокси доходит до вызова curl после re-exec.
 if [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${GEMINI_API_KEY:-}" ]; then
   exec op run --env-file=<(cat <<'EOF'
 OPENAI_API_KEY=op://AI-Tokens/OpenAI/credential
@@ -104,7 +137,7 @@ call_gpt() {
   local http
   # `--fail-with-body` возвращает non-zero на 4xx/5xx, но всё равно пишет body — нам нужен
   # error message. Поэтому игнорируем exit code (он у нас в HTTP code).
-  http=$(curl "${CURL_OPTS[@]}" \
+  http=$(curl "${CURL_OPTS[@]}" --max-time "$GPT_MAX_TIME" \
     -o "$GPT_OUT" -w "%{http_code}" \
     -H "Authorization: Bearer $OPENAI_API_KEY" \
     -H "Content-Type: application/json" \
@@ -130,7 +163,7 @@ call_gemini() {
     proxy_arg=(--socks5-hostname "$target")
   fi
   local http
-  http=$(curl "${CURL_OPTS[@]}" \
+  http=$(curl "${CURL_OPTS[@]}" --max-time "$GEM_MAX_TIME" \
     "${proxy_arg[@]}" \
     -o "$GEM_OUT" -w "%{http_code}" \
     -H "Content-Type: application/json" \
