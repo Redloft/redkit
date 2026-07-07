@@ -93,6 +93,7 @@ def check_job(job, live, findings):
     ctx, sourced, unresolved = gather_context(script)
     # реальный env из plist (для точного PATH-резолва + not-strict-XML сигнал)
     plist_env_path = None
+    pm = {}
     try:
         pm = plistparse.parse(job["plist"]) if job.get("plist") and os.path.exists(job["plist"]) else {}
         plist_env_path = pm.get("env_path")
@@ -102,6 +103,26 @@ def check_job(job, live, findings):
                                      "через plutil; launchd терпит, но почини комментарий"))
     except Exception:
         pass
+
+    # --- 0. no-trigger: plist без единого триггера — джоба сама не стартует ---
+    # По РАСПАРСЕННОМУ plist, не по реестру: seed отмывает kind=unknown в
+    # keepalive (реальный инцидент 2026-07 — plist без SCI/StartInterval/
+    # KeepAlive, RunAtLoad=false, джоба месяц молчала).
+    if pm and not pm.get("_error") and pm.get("kind") == "unknown":
+        if pm.get("run_at_load"):
+            findings.append(Finding("WARNING", "no-trigger", label,
+                                     "в plist нет StartCalendarInterval/StartInterval/KeepAlive — "
+                                     "запуск только RunAtLoad (раз на login/load); для периодической "
+                                     "джобы это тихая смерть",
+                                     fix="перегенери через `redjob add --generate` с kind "
+                                         "calendar|interval|keepalive"))
+        else:
+            findings.append(Finding("CRITICAL", "no-trigger", label,
+                                     "в plist нет ни одного триггера (StartCalendarInterval/"
+                                     "StartInterval/KeepAlive) и RunAtLoad=false — джоба НИКОГДА "
+                                     "не запустится",
+                                     fix="перегенери через `redjob add --generate` с kind "
+                                         "calendar|interval|keepalive"))
 
     # --- 5. Файловая гигиена ---
     interp = job.get("interpreter")
