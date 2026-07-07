@@ -1,0 +1,27 @@
+# redbrain seed-алиасы: ru↔en мост для частых сущностей (дизайн: entity-resolution Phase 1).
+# Формат: алиас | канон-имя. Загрузка: while IFS='|' read a c; do python3 lib/graphdb.py alias "$a" "$c"; done
+диадок|diadok
+трекер|yandex tracker
+инн|inn
+1пассворд|1password
+фейбл|fable
+хайку|haiku
+пульт|redcontrol
+т-банк|t-bank
+термопорт|termoport
+дмитрий|dmitry
+роман|roman
+олег|oleg
+1с|1c-fitness
+бегет|beget
+лояльность|loyalty
+промокод|promocode
+промокоды|promocode
+расстал|rasstal
+татпроф|ao-tatprof-invest
+татпроф инвест|ao-tatprof-invest
+рачков|rachkov-sergey
+тилда|tilda
+набережные челны|naberezhnye-chelny
+методология|methodology-transfer-playbook
+перенос методологии|methodology-transfer-playbook

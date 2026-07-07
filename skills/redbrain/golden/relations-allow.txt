@@ -1,0 +1,12 @@
+# Allowlist relation для episode-фактов (gate экстракции, panel rank 10).
+# Существующие relation графа разрешены автоматически — здесь только НОВЫЕ
+# темпоральные. DRAFT: калибруется в S3 после 1-2 недель реального потока (v2 §S2b).
+located_in
+traveling_to
+staying_at
+attending
+working_on
+planning
+scheduled_for
+meets_with
+unavailable_until
