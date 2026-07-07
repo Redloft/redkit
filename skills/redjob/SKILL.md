@@ -41,6 +41,7 @@ bin/redjob add <spec.json> --generate   # + сгенерить plist, self-docto
 
 | Правило | Severity | Ловит |
 |---|---|---|
+| `no-trigger` | CRITICAL | plist без единого триггера (StartCalendarInterval/StartInterval/KeepAlive) и RunAtLoad=false — джоба никогда не запустится. С RunAtLoad=true → WARNING. Смотрит в plist, не в реестр (seed отмывает kind=unknown→keepalive) |
 | `path-resolve` | CRITICAL | бинарь не резолвится в РЕАЛЬНОМ PATH джобы. Через login-shell (zsh -lc) → INFO |
 | `op-safety` | CRITICAL | `op` без op_env.sh/SA-токена → риск окна Keychain-доступа. depth=1 эвристика |
 | `exit-code` | CRITICAL/WARNING | 126/127 (не найден) → CRITICAL; прочий ненулевой → WARNING |

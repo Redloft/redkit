@@ -31,6 +31,17 @@ PLIST_TMPL = """<?xml version="1.0" encoding="UTF-8"?>
 ENV_PATH = ("  <key>EnvironmentVariables</key><dict><key>PATH</key>"
             "<string>/opt/homebrew/bin:/usr/bin:/bin</string></dict>")
 
+# plist БЕЗ единого триггера (SCI/StartInterval/KeepAlive) и RunAtLoad=false —
+# репродукция реального инцидента: launchd такой примет и будет вечно молчать.
+NOTRIG_TMPL = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>{script}</string></array>
+  <key>RunAtLoad</key><false/>
+</dict></plist>
+"""
+
 
 def write_script(path, body):
     with open(path, "w") as f:
@@ -143,6 +154,18 @@ def make_fixtures(root):
                  "interpreter": "/bin/bash", "deps_bins": [], "auth": "none",
                  "weight": "light", "status": "active"})
 
+    # 9. no-trigger: plist без SCI/StartInterval/KeepAlive, RunAtLoad=false →
+    # CRITICAL no-trigger. Реестр при этом врёт kind=keepalive (ровно так seed
+    # отмыл kind=unknown в реальном инциденте) — правило обязано смотреть в plist.
+    s = os.path.join(scripts, "notrigger.sh")
+    write_script(s, "echo dead")
+    p = os.path.join(agents, "fix.notrigger.plist")
+    with open(p, "w") as f:
+        f.write(NOTRIG_TMPL.format(label="fix.notrigger", script=s))
+    jobs.append({"label": "fix.notrigger", "project": "alpha", "kind": "keepalive",
+                 "plist": p, "script": s, "interpreter": "/bin/bash",
+                 "deps_bins": [], "auth": "none", "weight": "light", "status": "active"})
+
     # external с ИСЧЕЗНУВШИМ plist → НЕ должен давать drift-CRITICAL (QA1)
     jobs.append({"label": "com.google.SomeVendor", "project": "external",
                  "kind": "keepalive", "plist": os.path.join(agents, "com.google.SomeVendor.plist"),
@@ -168,6 +191,7 @@ EXPECT = [
     ("fix.commentsafe", "op-safety", "CRITICAL"),  # #2 гвард в комментарии ≠ safe
     ("fix.opwrap", "op-safety", "WARNING"),
     ("fix.drift", "drift-code", "WARNING"),
+    ("fix.notrigger", "no-trigger", "CRITICAL"),
     ("jobs.yaml", "secrets", "CRITICAL"),
 ]
 
@@ -380,6 +404,26 @@ def run():
     else:
         failures.append(f"plistgen: чужая коллизия просочилась в 'zz': {[f.label for f in uf if f.rule.startswith('collision')]}")
         print("  ✗ plistgen: чужая коллизия просочилась")
+
+    # no-trigger в self-doctor гейте: kind-опечатка → build_plist_dict молча
+    # игнорит calendar → plist без триггера → CRITICAL до показа install
+    ntspec = dict(clean, label="test.notrigger", kind="calender")   # опечатка намеренно
+    _, ntf, ntnc = plistgen.stage_and_check(ntspec)
+    if ntnc >= 1 and any(f.rule == "no-trigger" and f.sev == "CRITICAL" for f in ntf):
+        print("  ✓ plistgen          kind-опечатка → plist без триггера → CRITICAL no-trigger")
+    else:
+        failures.append(f"plistgen гейт пропустил plist без триггера (crit={ntnc})")
+        print(f"  ✗ plistgen: plist без триггера прошёл гейт (crit={ntnc})")
+
+    # no-trigger + RunAtLoad=true → мягче: WARNING (запуск раз на login — бывает намеренно)
+    ntw = dict(clean, label="test.notrigger.ral", kind="oneshot", run_at_load=True)
+    _, wf, wnc = plistgen.stage_and_check(ntw)
+    if wnc == 0 and any(f.rule == "no-trigger" and f.sev == "WARNING" for f in wf):
+        print("  ✓ plistgen          no-trigger+RunAtLoad → WARNING (не блокирует)")
+    else:
+        failures.append(f"no-trigger+RunAtLoad: ожидал WARNING без CRITICAL "
+                        f"(crit={wnc}, rules={[(f.rule, f.sev) for f in wf]})")
+        print("  ✗ plistgen: no-trigger+RunAtLoad severity неверна")
 
     # сгенерированный plist валиден по plutil
     path = plistgen._staging_path("test.clean")

@@ -74,6 +74,12 @@ def main(argv):
         return 0
 
     # --- генерация plist + self-doctor гейт ---
+    # kind вне VALID_KIND → build_plist_dict молча не пишет НИ ОДНОГО триггера
+    # (реальный инцидент: джоба месяц молчала) — заворачиваем на входе.
+    if spec.get("kind") not in ("calendar", "interval", "keepalive"):
+        _print(f"\n⚠ kind={spec.get('kind')!r} — обязан быть calendar|interval|keepalive, "
+               "иначе plist выйдет без триггера и launchd его никогда не запустит.")
+        return 2
     if spec.get("kind") == "calendar" and not spec.get("calendar"):
         _print("\n⚠ для --generate у calendar-джобы нужен конкретный 'calendar' "
                "(напр. {\"Hour\":11,\"Minute\":30}) — выбери слот из совета выше.")
