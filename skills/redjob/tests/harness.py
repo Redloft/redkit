@@ -435,6 +435,98 @@ def run():
         failures.append("plistgen: plist не проходит plutil -lint")
         print("  ✗ plistgen: невалидный plist")
 
+    # ---- vault-audit: гард-развёртка op-вызывателей ----
+    import vault_audit as _va
+    import json as _json, tempfile as _tf
+    # classify_command: голый op / op-sa / не-op / бинарь
+    _cl = {
+        "op": "critical",
+        os.path.expanduser("~/.claude/bin/op-sa"): "ok",
+        "op-sa": "ok",
+        "npx": "not-op",
+    }
+    _cl_ok = all(_va.classify_command(c)[0] == exp for c, exp in _cl.items())
+    if _cl_ok:
+        print("  ✓ vault-audit       classify: op→critical, op-sa→ok, npx→not-op")
+    else:
+        failures.append("vault-audit: classify_command severity неверна")
+        print("  ✗ vault-audit: classify_command")
+    # бинарь-обёртка (не текст-скрипт) НЕ грепается на op → not-op (анти-ложняк)
+    _binp = _tf.NamedTemporaryFile("wb", suffix="", delete=False)
+    _binp.write(b"\xcf\xfa\xed\xfe some op bytes here"); _binp.close()
+    if _va.classify_command(_binp.name)[0] == "not-op":
+        print("  ✓ vault-audit       бинарь-command не грепается (нет ложного op)")
+    else:
+        failures.append("vault-audit: бинарь дал ложный op-флаг")
+        print("  ✗ vault-audit: бинарь-command ложно флагнут")
+    os.unlink(_binp.name)
+    # end-to-end: фикстура с голым op MCP → ровно 1 CRITICAL
+    _fx = _tf.NamedTemporaryFile("w", suffix=".mcp.json", delete=False)
+    _json.dump({"mcpServers": {
+        "bad": {"command": "op", "args": ["run", "--", "x"]},
+        "good": {"command": os.path.expanduser("~/.claude/bin/op-sa"), "args": ["run"]},
+        "neutral": {"command": "npx", "args": ["z"]},
+    }}, _fx); _fx.close()
+    _orig = _va._mcp_config_paths
+    _va._mcp_config_paths = lambda: [_fx.name]
+    try:
+        _crit = [f for f in _va.scan_mcp_configs() if f.sev == "CRITICAL"]
+    finally:
+        _va._mcp_config_paths = _orig
+        os.unlink(_fx.name)
+    if len(_crit) == 1 and "bad" in _crit[0].target:
+        print("  ✓ vault-audit       фикстура: голый-op MCP пойман, op-sa/npx молчат")
+    else:
+        failures.append(f"vault-audit: MCP-скан ({len(_crit)} crit, "
+                        f"{[f.target for f in _crit]})")
+        print("  ✗ vault-audit: MCP-скан неверен")
+    # scrub-on-render: fake-токен не утекает в вывод
+    _leak = "sk-ABCDEF1234567890abcdef"
+    _rt, _ = _va.render([_va.VFinding("CRITICAL", "mcp-config", "s", f"утёк {_leak}")])
+    if _leak not in _rt:
+        print("  ✓ vault-audit       scrub-on-render маскирует секрет в находке")
+    else:
+        failures.append("vault-audit: scrub не замаскировал секрет")
+        print("  ✗ vault-audit: секрет утёк в render")
+    # args-gap: op спрятан в args generic-обёртки (bash -c "op ...") → critical;
+    # op-sa в args → ok; npx без op → not-op. (finalize FIX-FIRST #1)
+    _ag = [
+        (("bash", ["-c", "op run -- node s.js"]), "critical"),
+        (("bash", ["-c", "op-sa run -- node s.js"]), "ok"),
+        (("npx", ["-y", "firecrawl-mcp"]), "not-op"),
+    ]
+    _ag_ok = all(_va.classify_command(c, a)[0] == exp for (c, a), exp in _ag)
+    if _ag_ok:
+        print("  ✓ vault-audit       args-gap: bash -c 'op ..'→critical, op-sa→ok")
+    else:
+        failures.append("vault-audit: args-gap классификация неверна")
+        print("  ✗ vault-audit: args-gap")
+    # scan_launchd_chains: op в ДОЧЕРНЕМ звене без гарда → CRITICAL; с гардом → тихо
+    import registry as _reg
+    _cdir = _tf.mkdtemp()
+    _parent = os.path.join(_cdir, "parent.sh")
+    _child = os.path.join(_cdir, "child.sh")
+    write_script(_parent, "#!/bin/bash\nbash child.sh\n")
+    write_script(_child, "#!/bin/bash\nop run -- node x\n")   # голый op, без гарда
+    _job = {"label": "test.deep", "status": "active", "script": _parent}
+    _origload = _reg.load
+    _reg.load = lambda *a, **k: {"jobs": [_job]}
+    try:
+        _fs_bad = _va.scan_launchd_chains()
+        # с гардом в дочернем звене → находки нет
+        write_script(_child, "#!/bin/bash\nsource op_env.sh\nop run -- node x\n")
+        _fs_ok = _va.scan_launchd_chains()
+    finally:
+        _reg.load = _origload
+    import shutil as _sh
+    _sh.rmtree(_cdir, ignore_errors=True)
+    if (len(_fs_bad) == 1 and _fs_bad[0].target == "test.deep"
+            and _fs_bad[0].sev == "CRITICAL" and len(_fs_ok) == 0):
+        print("  ✓ vault-audit       launchd-chain: deep op без гарда→CRITICAL, с гардом→тихо")
+    else:
+        failures.append(f"vault-audit: launchd-chain (bad={len(_fs_bad)}, ok={len(_fs_ok)})")
+        print("  ✗ vault-audit: launchd-chain")
+
     print()
     if failures:
         print(f"FAIL: {len(failures)} провалов")

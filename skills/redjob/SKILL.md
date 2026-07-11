@@ -30,6 +30,10 @@ homebrew (скрипт падает 127), `op` без service-account токен
 # Фаза 1 — read-only
 bin/redjob list [--md]      # карта: timeline / interval / persistent / по проектам
 bin/redjob doctor [--quiet] # аудит; exit≠0 при CRITICAL; --quiet прячет INFO
+bin/redjob vault-audit      # кто может открыть окно доступа к 1Password-сейфу:
+                            #   MCP-конфиги с голым `command:op`/op-в-args + headless
+                            #   launchd-цепочки depth>1 без гарда токена. Детерминированно
+                            #   (НЕ лог — TCC-события приватны), read-only. exit≠0 при CRITICAL.
 bin/redjob validate         # jobs.yaml по схеме
 bin/redjob seed [--write]   # собрать реестр из живых plist (dry-run без --write)
 # Фаза 2 — советник (НЕ устанавливает, сажает человек)

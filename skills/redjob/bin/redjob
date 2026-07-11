@@ -7,6 +7,7 @@
   redjob validate         проверить jobs.yaml по схеме
   redjob seed [--write]   пересобрать реестр из живых plist (dry-run без --write)
   redjob add <spec.json> [--generate]   советник размещения (Ф2) + генерация plist
+  redjob vault-audit      развёртка «кто может открыть окно 1Password-сейфа»
   redjob version
 
 Фаза 1 НЕ лечит и НЕ трогает launchd — только читает и диагностирует.
@@ -61,6 +62,9 @@ def main():
     if cmd == "add":
         import add_cmd
         return add_cmd.main(rest)
+    if cmd == "vault-audit":
+        import vault_audit
+        return vault_audit.main(rest)
     if cmd == "version":
         import registry
         print(f"redjob Фаза 1+2 · schema v{registry.SCHEMA_VERSION}")

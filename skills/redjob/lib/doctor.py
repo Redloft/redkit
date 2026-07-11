@@ -391,6 +391,20 @@ def run(reg_path=None, la_dir=None):
     for j in data.get("jobs", []):
         check_job(j, live, findings)
     check_park(data, live, findings, la_dir=la_dir, reg_path=reg_path)
+    # op-safety-2: слепые зоны depth-1 op-safety — MCP-серверы в ~/.claude.json
+    # с голым `command: op` (+ op в args обёртки) И headless launchd-цепочки
+    # глубже depth-1. Отдельный rule-id, не дублирует launchd-op-safety depth-1
+    # (scan_launchd_chains исключает сам script джобы). Сбой скана НЕ глушим тихо
+    # — иначе регрессия даёт ложно-чистый doctor (false-clean в security-инструменте).
+    try:
+        import vault_audit
+        for vf in vault_audit.scan():
+            findings.append(Finding(vf.sev, "op-safety-2", vf.target, vf.msg, vf.fix))
+    except Exception as e:
+        findings.append(Finding("WARNING", "op-safety-2", "vault-audit",
+                                f"op-safety-2 не смог выполниться ({type(e).__name__}) — "
+                                f"MCP/launchd-развёртка НЕ проверена этим прогоном",
+                                fix="прогони `redjob vault-audit` вручную и почини импорт/скан"))
     return data, findings
 
 
