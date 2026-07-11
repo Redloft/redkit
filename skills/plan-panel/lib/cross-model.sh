@@ -103,7 +103,7 @@ ${REVIEWS}
 
 Верни СТРОГО JSON (без markdown):
 {
-  \"reviewer_model\": \"gpt-5\" or \"gemini-2.5-pro\",
+  \"reviewer_model\": \"gpt-5\" or \"gemini-pro-latest\",
   \"panel_confidence\": 0.85,
   \"agreed_findings\": [\"short refs to claude findings you agree with\"],
   \"disputed_findings\": [
@@ -168,7 +168,7 @@ call_gemini() {
     -o "$GEM_OUT" -w "%{http_code}" \
     -H "Content-Type: application/json" \
     -d "$payload" \
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=$GEMINI_API_KEY" || true)
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-latest:generateContent?key=$GEMINI_API_KEY" || true)
   printf '%s\n' "$http" > "$GEM_META"
 }
 

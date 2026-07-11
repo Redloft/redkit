@@ -10,7 +10,7 @@ set -euo pipefail
 TOPIC_FILE="${1:?usage: gemini-review.sh <topic> <report> <sources> [model]}"
 REPORT_FILE="${2:?need report}"
 SOURCES_FILE="${3:?need sources}"
-MODEL="${4:-gemini-2.5-pro}"
+MODEL="${4:-gemini-pro-latest}"
 for var in TOPIC_FILE REPORT_FILE SOURCES_FILE; do
   p="${!var}"; { [ -f "$p" ] && [ -r "$p" ]; } || { printf '{"error":"%s_missing"}\n' "${var,,}"; exit 1; }
 done

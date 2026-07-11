@@ -457,7 +457,7 @@ log(`Synth: cite_coverage=${synth.cite_coverage} · confidence=${synth.confidenc
 // Gemini second-opinion synth (standard+) — обогащает, не блокирует. $GEMINI_API_KEY уже в env.
 let geminiNote = null
 if (mode !== 'lite') {
-  const geminiModel = mode === 'standard' ? 'gemini-2.5-flash' : 'gemini-2.5-pro'
+  const geminiModel = mode === 'standard' ? 'gemini-flash-latest' : 'gemini-pro-latest'
   log(`Gemini cross-read (${geminiModel}) для second-opinion (graceful, non-blocking)...`)
   const g = await agent(
     `Ты — synth-gemini из skill redresearch. ${roleRef('synth-gemini')}\n` +
@@ -592,7 +592,7 @@ const metaObj = {
   models: {
     scoper: 'haiku', hunter: modelFor('hunter', mode), reader: modelFor('reader', mode),
     synth: modelFor('synth', mode), judge: modelFor('judge', mode),
-    gemini: mode === 'lite' ? null : (mode === 'standard' ? 'gemini-2.5-flash' : 'gemini-2.5-pro'),
+    gemini: mode === 'lite' ? null : (mode === 'standard' ? 'gemini-flash-latest' : 'gemini-pro-latest'),
     gpt5: mode === 'ultra' ? 'gpt-5' : null,
   },
   cross_model_used: mode === 'ultra',

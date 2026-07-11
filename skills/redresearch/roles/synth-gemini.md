@@ -20,7 +20,7 @@ curl -s -X POST \
   -H 'Content-Type: application/json' \
   -d @<(jq -nc --arg p "$PROMPT" '{contents:[{parts:[{text:$p}]}],generationConfig:{temperature:0.3}}')
 ```
-`MODEL` = `gemini-2.5-flash` (standard) либо `gemini-2.5-pro` (heavy/ultra).
+`MODEL` = `gemini-flash-latest` (standard) либо `gemini-pro-latest` (heavy/ultra).
 
 Если API недоступен / ошибка / нет ключа → верни `{"error": "..."}` и продолжай. Отчёт остаётся Claude-only (degraded, не сломан).
 
@@ -38,7 +38,7 @@ curl -s -X POST \
 
 ```json
 {
-  "model": "gemini-2.5-pro",
+  "model": "gemini-pro-latest",
   "inaccuracies": ["..."],
   "missing": ["..."],
   "unsupported": ["..."],
