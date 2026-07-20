@@ -7,7 +7,7 @@
 ## Цель
 
 Прочитать тему (+ явные флаги пользователя) и за один проход решить:
-1. **mode** — lite / standard / heavy / ultra (объём конвейера)
+1. **mode** — quick / lite / standard / heavy / ultra (объём конвейера)
 2. **output_template** — brief / standard / deep (форма отчёта)
 3. **ru_lang** — язык темы (RU vs EN)
 4. **primary_sources_needed** — нужны ли первоисточники (стандарты/законы/peer-review)
@@ -56,13 +56,15 @@ Scoper НЕ исследует тему. Он маршрутизирует. Де
 | Пользователь явно сказал «глубокий ресерч» / "deep research" / «максимально подробно» | **heavy** | deep | **true** |
 | Academic / legal / regulatory / медицина / финансы-с-последствиями + нужны citations | **heavy** | deep | **true** |
 | Тема — обзор с 3-5 углами, сравнение, «плюсы и минусы», «что известно про» | **standard** | standard | false |
-| 1-2 предложения, конкретный факт/определение/«что такое X» | **lite** | brief | false |
+| 1-2 предложения, конкретный факт/определение/«что такое X» (с мини-контекстом) | **lite** | brief | false |
+| ОДИН быстрый факт с УКЛОНОМ В АКТУАЛЬНОСТЬ: «какая последняя версия / текущий статус / когда вышло / актуально ли / правда ли X» — нужен свежий ответ из веба, НЕ отчёт | **quick** | brief | false |
 | Не удалось классифицировать уверенно | **standard** | standard | false (но confidence ≤ 0.5) |
 
 **Override**: если в `user_flags` указан конкретный mode — он побеждает все правила выше (но всё равно заполни mode_reasoning почему юзер так попросил).
 
 ## output_template маппинг
 
+- quick → `brief`
 - lite → `brief`
 - standard → `standard`
 - heavy → `deep`
@@ -72,6 +74,7 @@ Scoper НЕ исследует тему. Он маршрутизирует. Де
 
 | mode | base | +за подтему | потолок |
 |---|---:|---:|---:|
+| quick | 8 | +2 | 20 |
 | lite | 90 | +20 | 180 |
 | standard | 240 | +40 | 480 |
 | heavy | 720 | +80 | 1500 |
@@ -104,7 +107,7 @@ Scoper НЕ исследует тему. Он маршрутизирует. Де
 
 ## Self-check
 
-- [ ] `mode` ∈ {lite, standard, heavy, ultra}, `output_template` соответствует маппингу
+- [ ] `mode` ∈ {quick, lite, standard, heavy, ultra}, `output_template` соответствует маппингу
 - [ ] `estimated_seconds` в пределах потолка mode
 - [ ] `ru_lang` отражает реальную долю кириллицы в теме
 - [ ] heavy/ultra → `needs_user_confirmation: true`
