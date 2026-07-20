@@ -38,6 +38,13 @@ CURL_OPTS=(
 # Per-leg curl timeouts (сек). GPT-5 медленнее на больших промптах; Gemini — через SOCKS5 proxy.
 GPT_MAX_TIME="${GPT_MAX_TIME:-300}"
 GEM_MAX_TIME="${GEM_MAX_TIME:-180}"
+KIMI_MAX_TIME="${KIMI_MAX_TIME:-480}"   # K3 always-on thinking на больших research-промптах МЕДЛЕННЫЙ (240с не хватало, эмпирика 2026-07-20); gated ногой (RESEARCH_KIMI=1)
+
+# Kimi K3 (Moonshot) — ОПЦИОНАЛЬНАЯ 3-я нога за тумблером RESEARCH_KIMI=1 (default off).
+# Кандидат в независимые голоса research-ревью (2026-07-20). Прод-пара остаётся gpt+gemini,
+# пока мини-A/B не докажет уникальные находки (урок домен-зависимости: GLM тут отклонён 07-03).
+# Гео РФ = прямой доступ (в отличие от Gemini), прокси НЕ нужен.
+RESEARCH_KIMI="${RESEARCH_KIMI:-0}"
 
 # ─── Gemini geo-block workaround ───
 # Gemini geo-блокирует RU IP (оба auth-пути — и ?key=, и x-goog-api-key header — дают live 400
@@ -61,12 +68,19 @@ fi
 # Self-wrap если env не выставлен (один op call на оба провайдера; секрет только в child env)
 # GLM протестирован как 3-й голос (mini-A/B 2026-07-03) → ОТКЛОНЁН (B): дубль gpt+gemini на
 # research-отчётах (overlap 87%, unique-real 0.5/отчёт, вклад = рантайм не по профилю). Пара gpt+gemini.
-if [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${GEMINI_API_KEY:-}" ]; then
-  exec op run --env-file=<(cat <<'EOF'
-OPENAI_API_KEY=op://AI-Tokens/OpenAI/credential
-GEMINI_API_KEY=op://AI-Tokens/Gemini/credential
-EOF
-) -- bash "$0" "$@"
+_need_wrap=0
+[ -z "${OPENAI_API_KEY:-}" ] && _need_wrap=1
+[ -z "${GEMINI_API_KEY:-}" ] && _need_wrap=1
+[ "$RESEARCH_KIMI" = "1" ] && [ -z "${MOONSHOT_API_KEY:-}" ] && _need_wrap=1
+if [ "$_need_wrap" = "1" ]; then
+  _envf() {
+    printf 'OPENAI_API_KEY=op://AI-Tokens/OpenAI/credential\n'
+    printf 'GEMINI_API_KEY=op://AI-Tokens/Gemini/credential\n'
+    # ключ Kimi добавляем в env-file ТОЛЬКО при включённой ноге — иначе op не тянет item,
+    # и отсутствие/удаление карточки Moonshot не ломает прод-пару gpt+gemini.
+    [ "$RESEARCH_KIMI" = "1" ] && printf 'MOONSHOT_API_KEY=op://AI-Tokens/Moonshot Kimi API/credential\n'
+  }
+  exec op run --env-file=<(_envf) -- bash "$0" "$@"
 fi
 
 TOPIC=$(cat "$TOPIC_FILE")
@@ -131,7 +145,8 @@ ${SOURCES}
 }"
 
 GPT_OUT=$(mktemp); GEM_OUT=$(mktemp); GPT_META=$(mktemp); GEM_META=$(mktemp)
-trap 'rm -f "$GPT_OUT" "$GEM_OUT" "$GPT_META" "$GEM_META"' EXIT
+KIMI_OUT=$(mktemp); KIMI_META=$(mktemp)
+trap 'rm -f "$GPT_OUT" "$GEM_OUT" "$GPT_META" "$GEM_META" "$KIMI_OUT" "$KIMI_META"' EXIT
 
 call_gpt() {
   local payload
@@ -170,9 +185,34 @@ call_gemini() {
   printf '%s\n' "$http" > "$GEM_META"
 }
 
+call_kimi() {
+  # Moonshot Chat Completions (OpenAI-совместимый). max_tokens с headroom —
+  # K3 always-on thinking жжёт бюджет до ответа (reasoning_tokens), малый лимит → пустой content.
+  # max_tokens 16000: K3 в JSON-режиме жжёт ~8000 токенов на reasoning ДО ответа (эмпирика A/B
+  # 2026-07-20) — при 8000 finish=length и ПУСТОЙ content на любом размере отчёта. 16000 даёт
+  # thinking (~7-8k) + сам ответ (~2-3k) уложиться. Латентность всё равно ~5-7 мин на вызов.
+  local payload
+  payload=$(jq -nc --arg p "$PROMPT" '{
+    model: "kimi-k3",
+    messages: [{role:"user", content:$p}],
+    max_tokens: 16000,
+    response_format: {type:"json_object"}
+  }')
+  local http
+  http=$(curl "${CURL_OPTS[@]}" --max-time "$KIMI_MAX_TIME" -o "$KIMI_OUT" -w "%{http_code}" \
+    -H "Authorization: Bearer $MOONSHOT_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    https://api.moonshot.ai/v1/chat/completions || true)
+  printf '%s\n' "$http" > "$KIMI_META"
+}
+
 call_gpt & PID_GPT=$!
 call_gemini & PID_GEM=$!
+PID_KIMI=''
+if [ "$RESEARCH_KIMI" = "1" ]; then call_kimi & PID_KIMI=$!; fi
 wait "$PID_GPT" "$PID_GEM"
+[ -n "$PID_KIMI" ] && wait "$PID_KIMI"
 
 GPT_HTTP=$(cat "$GPT_META"); GEM_HTTP=$(cat "$GEM_META")
 
@@ -198,26 +238,48 @@ else
   GEM_ERR="http_$GEM_HTTP: $(jq -r '.error.message // tostring' < "$GEM_OUT" | head -c 200)"
 fi
 
-# Cost estimate (GPT-5 ~$5/M in + $20/M out; Gemini 2.5 Pro $1.25/M in + $5/M out)
+# ─── Kimi leg parse (только если нога включена) ───
+KIMI_JSON='null'; KIMI_USAGE='null'; KIMI_ERR=''; KIMI_IN=0; KIMI_OUT_T=0
+if [ "$RESEARCH_KIMI" = "1" ]; then
+  KIMI_HTTP=$(cat "$KIMI_META")
+  if [ "$KIMI_HTTP" = "200" ]; then
+    KIMI_CONTENT=$(jq -r '.choices[0].message.content // ""' < "$KIMI_OUT")
+    KIMI_USAGE=$(jq -c '.usage // {}' < "$KIMI_OUT")
+    if [ -n "$KIMI_CONTENT" ]; then
+      KIMI_JSON=$(echo "$KIMI_CONTENT" | jq -c '.' 2>/dev/null || echo "{\"parse_error\":true,\"raw\":$(echo "$KIMI_CONTENT" | jq -Rs .)}")
+    else KIMI_ERR="empty_content"; fi   # пусто при малом бюджете = thinking съел max_tokens
+  else
+    KIMI_ERR="http_$KIMI_HTTP: $(jq -r '.error.message // tostring' < "$KIMI_OUT" | head -c 200)"
+  fi
+  KIMI_IN=$(echo "$KIMI_USAGE" | jq -r '.prompt_tokens // 0')
+  KIMI_OUT_T=$(echo "$KIMI_USAGE" | jq -r '.completion_tokens // 0')
+fi
+
+# Cost estimate (GPT-5 ~$5/M in + $20/M out; Gemini 2.5 Pro $1.25/M in + $5/M out; Kimi K3 $3/M in + $15/M out)
 GPT_IN=$(echo "$GPT_USAGE" | jq -r '.prompt_tokens // 0')
 GPT_OUT_T=$(echo "$GPT_USAGE" | jq -r '.completion_tokens // 0')
 GEM_IN=$(echo "$GEM_USAGE" | jq -r '.promptTokenCount // 0')
 GEM_OUT_T=$(echo "$GEM_USAGE" | jq -r '.candidatesTokenCount // 0')
-COST=$(awk -v gi="$GPT_IN" -v go="$GPT_OUT_T" -v ggi="$GEM_IN" -v ggo="$GEM_OUT_T" \
-  'BEGIN{printf "%.4f", gi*5/1e6 + go*20/1e6 + ggi*1.25/1e6 + ggo*5/1e6}')
+COST=$(awk -v gi="$GPT_IN" -v go="$GPT_OUT_T" -v ggi="$GEM_IN" -v ggo="$GEM_OUT_T" -v ki="$KIMI_IN" -v ko="$KIMI_OUT_T" \
+  'BEGIN{printf "%.4f", gi*5/1e6 + go*20/1e6 + ggi*1.25/1e6 + ggo*5/1e6 + ki*3/1e6 + ko*15/1e6}')
 
 jq -nc \
-  --argjson gpt "$GPT_JSON" --argjson gem "$GEM_JSON" \
-  --arg gpt_err "$GPT_ERR" --arg gem_err "$GEM_ERR" \
+  --argjson gpt "$GPT_JSON" --argjson gem "$GEM_JSON" --argjson kimi "$KIMI_JSON" \
+  --arg gpt_err "$GPT_ERR" --arg gem_err "$GEM_ERR" --arg kimi_err "$KIMI_ERR" \
   --argjson gpt_in "$GPT_IN" --argjson gpt_out "$GPT_OUT_T" \
   --argjson gem_in "$GEM_IN" --argjson gem_out "$GEM_OUT_T" \
+  --argjson kimi_in "$KIMI_IN" --argjson kimi_out "$KIMI_OUT_T" \
+  --arg kimi_on "$RESEARCH_KIMI" \
   --arg cost "$COST" \
   '{
-    gpt: $gpt, gemini: $gem,
-    errors: [ ($gpt_err|select(.!="")), ($gem_err|select(.!="")) ],
-    usage: {
+    gpt: $gpt, gemini: $gem
+  }
+  + (if $kimi_on=="1" then {kimi: $kimi} else {} end)
+  + {
+    errors: ([ ($gpt_err|select(.!="")), ($gem_err|select(.!="")), ($kimi_err|select(.!="")) ]),
+    usage: ({
       gpt: {input_tokens:$gpt_in, output_tokens:$gpt_out},
       gemini: {input_tokens:$gem_in, output_tokens:$gem_out},
       cost_usd: $cost
-    }
+    } + (if $kimi_on=="1" then {kimi:{input_tokens:$kimi_in, output_tokens:$kimi_out}} else {} end))
   }'
