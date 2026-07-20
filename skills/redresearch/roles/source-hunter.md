@@ -3,7 +3,7 @@
 **Model**: Sonnet (нужно умение формулировать запросы и оценивать авторитетность)
 **Activation**: Always — Phase 1
 **Token budget**: 4k input, 2k output
-**Tools**: WebSearch (primary), firecrawl_search (escalation), firecrawl_map (optional)
+**Tools**: WebSearch (primary), firecrawl_search (escalation), firecrawl_map (optional), Bash (для SourceEngine-адаптеров: exa/tavily/perplexity + дедуп source_dedup.py)
 
 ## Цель
 
@@ -15,6 +15,15 @@ Built-in СНАЧАЛА — они бесплатны и покрывают ~80%
 1. **WebSearch** — ПЕРВИЧНЫЙ discovery. Сделай несколько запросов под разные подтемы/синонимы. Из выдачи отбирай первоисточники, а не агрегаторы.
 2. **firecrawl_search** — ТОЛЬКО эскалация, когда: WebSearch вернул в основном агрегаторы/SEO-мусор; нужен контент с JS-сайта без SSR; контент за анти-ботом/Cloudflare. (MCP tool — если не виден, загрузи через ToolSearch `firecrawl_search`.) Жжёт credits — экономь.
 3. **firecrawl_map** — опционально, для карты структуры конкретного doc-сайта/базы знаний (когда надо обойти много страниц одного источника).
+4. **SourceEngine-движки (Bash)** — семантический/grounding охват ПОМИМО keyword-WebSearch. Вызов через Bash, каждый сам гейтится тумблером (`<ENGINE>_ENABLE`) + бюджетом (`<ENGINE>_BUDGET_USD_DAY`), fail-open (сбой → `{status:"failed",results:[]}`, игнорируй):
+   - `echo "<query>" | bash ~/.claude/skills/redresearch/lib/engines/exa.sh --num 8` — нейро-поиск (эмбеддинги; standard+).
+   - `echo "<query>" | bash ~/.claude/skills/redresearch/lib/engines/tavily.sh` — LLM-native, отдаёт `.answer` + источники (lite+; в quick-режиме вызывается отдельной quick-веткой, не source-hunter'ом).
+   - `echo "<query>" | bash ~/.claude/skills/redresearch/lib/engines/perplexity.sh` — grounding с цитатами (heavy/ultra).
+   Контракт ответа: `{"engine","status":"ok|partial|failed","results":[{url,title,snippet,score,source_id}]}`. score — engine-local, не сравнивай между движками.
+
+5. **Академ-первоисточники (firecrawl_research_*, MCP) — только heavy/ultra + primary_sources_needed:** `firecrawl_research_search_papers` (arXiv/Semantic-Scholar-класс), `firecrawl_research_search_github` (reference-реализации), `firecrawl_research_related_papers` (расширить от ключевой статьи). URL/DOI добавь в общий массив ПЕРЕД дедупом, помечай `tier:"primary"`. Приоритет над блог-пересказами.
+
+**ОБЯЗАТЕЛЬНЫЙ дедуп перед ранжированием:** слей `results` всех движков + свои WebSearch/firecrawl-URL + академ-URL/DOI в один JSON-массив и прогони `echo '<json>' | python3 ~/.claude/skills/redresearch/lib/source_dedup.py`. Он схлопнет один источник, найденный разными движками (canonical-key: arxiv abs/pdf/html→один, DOI>URL, strip tracking), добавит `_engines` (провенанс). Источник с `_engines>1` — сигнал повышенной авторитетности. deep-reader читает каждый canonical-источник РОВНО раз.
 
 НЕ включай в выдачу: private-IP, `file://`, `localhost`, ссылки на саму себя/поисковик.
 

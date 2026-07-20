@@ -1,20 +1,26 @@
 ---
 name: redresearch
 description: |
-  Use when user wants deep, multi-source, fact-checked research on a topic — beyond a single web search. Spawns a pipeline of subagents (scoper → source-hunter → deep-reader(s) → synth → judge), each with a strict cite-everything protocol, and produces a cited report.md with confidence ratings. Local-first: runs on this Mac, artifacts in ~/Library/Application Support/redresearch/.
+  Use when user wants research OR a fast, current, fact-checked web lookup. Two speeds: QUICK mode = one-pass grounded answer via best-in-class search engines (Tavily + Exa) with citations — for "what's the latest X / is Y current / when did Z ship"; DEEP modes spawn a full subagent pipeline (scoper → source-hunter → deep-reader → synth → judge) with cite-everything protocol → cited report.md. Local-first, artifacts in ~/Library/Application Support/redresearch/.
 
-  TRIGGER on:
+  ⚡ QUICK-TRIGGER (авто, БЕЗ явного запроса — когда нужен свежий/актуальный факт из веба, но НЕ глубокий разбор):
+  • «какая последняя версия / текущий статус / актуально ли X», «что сейчас с X», «когда вышло X», «правда ли что X»
+  • любой вопрос, где ответ модели может УСТАРЕТЬ (версии, релизы, цены, даты, «last/latest/current») и нужен точный свежий факт с источником
+  • "what's the latest / current X", "is X still …", "when did X release", quick fact-checks
+  → это НЕ «загугли» вручную: quick-режим сам прогоняет Tavily + Exa и даёт grounded-ответ с цитатами лучше сырого WebSearch.
+
+  DEEP-TRIGGER on:
   • «исследуй X», «глубокий ресерч по X», «разберись детально в X», «собери всё про X»
   • «что известно про X», «сделай обзор X», «pro и contra X с источниками»
   • "research X", "deep dive on X", "do a deep research report on X", "investigate X with sources"
   • Explicit: «/research», «/research-resume», «/research-status», «/research-list», «/research-cleanup»
 
-  4 mode (scoper выбирает, user подтверждает для heavy/ultra):
-  lite (factoid, <3мин, Claude) · standard (обзор, Claude+Gemini Flash) ·
-  heavy (academic/legal, 15-25 источников, background + TG ping) ·
+  5 mode (scoper выбирает, user подтверждает для heavy/ultra):
+  quick (быстрый факт, <10с, 1 проход движки+синтез) · lite (factoid, <3мин, Claude) ·
+  standard (обзор, Claude+Gemini Flash) · heavy (academic/legal, 15-25 источников, background + TG ping) ·
   ultra (critical, 30+, Claude+GPT-5+Gemini Pro + meta-judge).
 
-  НЕ для: «загугли X» (одиночный факт → WebSearch напрямую), генерация контента, код.
+  НЕ для: генерация контента, код.
 allowed-tools:
   - Bash
   - Read
