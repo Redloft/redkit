@@ -20,7 +20,8 @@ export const meta = {
 
 // FABLE: Fable 5 ещё не доступен в API → предсказуемый фоллбэк на opus (judge-модель
 // до миграции). Единственная точка переключения — вернуть 'fable' когда выкатят.
-const FABLE = 'opus'  // ← 'fable' когда модель появится
+// Judge на Opus: finalize гоняется постоянно, ultra-режима нет.
+const JUDGE_MODEL = 'opus'
 
 const A = (typeof args === 'string' ? (() => { try { return JSON.parse(args) } catch { return {} } })() : args) || {}
 let diffText = A.diff_text || ''
@@ -277,7 +278,7 @@ const judge = await agent(
   `=== STABILIZE REPORT ===\n${JSON.stringify(stab, null, 2)}\n=== END ===\n\n` +
   `=== ROLE REVIEWS ===\n${JSON.stringify(reviews.map(r => ({ role: r.role, verdict: r.verdict, findings: r.findings, summary: r.summary })), null, 2)}\n=== END ===\n\n` +
   `${buildEnvelope(null)}\n\nВерни JSON по JUDGE_SCHEMA. final_verdict_reasoning объясни явно.`,
-  { label: 'judge', phase: 'Judge', model: FABLE, schema: JUDGE_SCHEMA }
+  { label: 'judge', phase: 'Judge', model: JUDGE_MODEL, schema: JUDGE_SCHEMA }
 )
 if (!judge) return { error: 'judge-failed', verdict: 'UNCERTAIN', reviews }
 

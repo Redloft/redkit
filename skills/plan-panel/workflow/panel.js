@@ -20,12 +20,16 @@ export const meta = {
   ],
 }
 
+// Fable — только на --ultra. Дефолт (lite/standard/heavy) судит Opus:
+// вдвое дешевле при сопоставимом качестве. Константа — якорь для Fable-guard.
+const FABLE = 'fable'
+
 const ROLE_DEFINITIONS = {
   scoper:    { file: '~/.claude/skills/plan-panel/roles/scoper.md',    model: 'haiku' },
   architect: { file: '~/.claude/skills/plan-panel/roles/architect.md', model: 'sonnet' },
   qa:        { file: '~/.claude/skills/plan-panel/roles/qa.md',        model: 'sonnet' },
   security:  { file: '~/.claude/skills/plan-panel/roles/security.md',  model: 'sonnet' },
-  judge:     { file: '~/.claude/skills/plan-panel/roles/judge.md',     model: 'opus' },
+  judge:     { file: '~/.claude/skills/plan-panel/roles/judge.md',     model: 'opus' },  // ultra → fable
   // Phase B: frontend, backend, data, ops
 }
 
@@ -324,7 +328,7 @@ const judge = await agent(
   `- FAIL: ≥2 critical от разных ролей + неразрешимые конфликты\n` +
   `- UNCERTAIN: confidence <0.5\n\n` +
   `Верни JSON по judge schema.`,
-  { label: 'judge', phase: 'Synthesize', model: 'opus', schema: JUDGE_SCHEMA }
+  { label: 'judge', phase: 'Synthesize', model: effectiveMode === 'ultra' ? FABLE : 'opus', schema: JUDGE_SCHEMA }
 )
 
 if (!judge) {

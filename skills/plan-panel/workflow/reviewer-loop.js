@@ -36,7 +36,7 @@ const MAX_ITERS  = Number(A.max_iters || 2)
 const PANEL = A?.panel_path || `${(typeof process !== 'undefined' && process.env && process.env.HOME) || '~'}/.claude/skills/plan-panel/workflow/panel.js`
 // FABLE: Fable 5 ещё не доступен в API → предсказуемый фоллбэк на opus (planner-модель
 // до миграции). Единственная точка переключения — вернуть 'fable' когда выкатят.
-const FABLE = 'opus'  // ← 'fable' когда модель появится
+const FABLE = 'fable'   // planner draft/revise — потолок важнее цены
 
 if (!taskText.trim()) {
   return { error: 'no-task', verdict: 'UNCERTAIN', reason: 'task_text пустой' }

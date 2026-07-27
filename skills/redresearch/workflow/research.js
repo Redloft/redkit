@@ -226,8 +226,9 @@ const FABLE = 'fable'
 function modelFor(role, mode) {
   if (role === 'scoper') return 'haiku'
   if (role === 'reader') return mode === 'lite' ? 'haiku' : 'sonnet'
-  if (role === 'judge')  return mode === 'lite' ? 'haiku' : FABLE
-  if (role === 'synth')  return (mode === 'heavy' || mode === 'ultra') ? FABLE : 'sonnet'
+  // Fable — только ultra. heavy/standard судит и синтезирует Opus.
+  if (role === 'judge')  return mode === 'lite' ? 'haiku' : (mode === 'ultra' ? FABLE : 'opus')
+  if (role === 'synth')  return mode === 'ultra' ? FABLE : (mode === 'heavy' ? 'opus' : 'sonnet')
   return 'sonnet' // hunter, fact-checker
 }
 

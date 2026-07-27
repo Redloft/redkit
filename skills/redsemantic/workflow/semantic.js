@@ -74,11 +74,12 @@ const SUGGEST_EXPAND = { lite: false, standard: false, heavy: true }[mode]  // a
 const MIN_KEYWORDS   = { lite: 20, standard: 60, heavy: 120 }[mode]
 // FABLE: Fable 5 ещё не доступен в API → предсказуемый фоллбэк на opus (judge/cluster/
 // structure модель до миграции). Единственная точка переключения — вернуть 'fable' когда выкатят.
-const FABLE = 'opus'  // ← 'fable' когда модель появится
+// У redsemantic нет ultra-режима, heavy — рабочий путь → Opus.
+const HEAVY_MODEL = 'opus'
 const modelFor = (role) => {
   if (mode === 'lite') return role === 'judge' ? 'sonnet' : 'haiku'
-  if (mode === 'heavy') return (role === 'cluster' || role === 'structure' || role === 'judge') ? FABLE : 'sonnet'
-  return role === 'judge' ? FABLE : 'sonnet'   // standard
+  if (mode === 'heavy') return (role === 'cluster' || role === 'structure' || role === 'judge') ? HEAVY_MODEL : 'sonnet'
+  return role === 'judge' ? HEAVY_MODEL : 'sonnet'   // standard
 }
 
 // ───────────────────────── schemas ─────────────────────────
