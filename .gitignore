@@ -11,3 +11,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Приватные данные оператора — НИКОГДА не публикуем
+**/golden/aliases.txt
+**/docs/review/

@@ -176,7 +176,7 @@ const GEO_EDGE_TZ = [
   '2. Cloudflare — DNS-only (без прокси).  3. TLS терминируется на RU-edge; edge→origin — `proxy_ssl_verify off` (внутр.).',
   '4. Деплой статики: `rsync build/ → origin:/opt/projects/<proj>/build/` (после сборки; вручную/CI).  5. Откат — одна строка `proxy_pass` + DNS-запись.',
   '6. ⚠️ **Китай этим НЕ решается** (RU-фронт режется GFW) — отдельный трек: ICP-лицензия + китайский CDN (Alibaba/Tencent).',
-  'Референс рабочей реализации: проекты **reference-project / example-project** (VPS1 Beget RU REDACTED-IP → Hetzner Helsinki REDACTED-IP). Детали — 1Password «Geo-edge chain (RU+world): VPS1 → Hetzner» + ClaudeCore `apis/cloudflare.md`.',
+  'Паттерн обкатан на боевых проектах (RU-edge на российском хостинге → зарубежный origin). Конкретные хосты, IP и ключи — только в приватных заметках оператора (менеджер секретов + личная база), НЕ в этом промте и НЕ в репозитории.',
 ].join('\n')
 
 const GEO_EDGE_PROMPT = [

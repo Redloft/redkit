@@ -1,8 +1,8 @@
 # core-MPs — provenance index (maintainer-only)
-<!-- NOT copied into projects. Documents which Reference-Project MPs each kit template generalizes from. -->
+<!-- NOT copied into projects. Documents which reference-project MPs each kit template generalizes from. -->
 
-> Эта папка — **карта происхождения**: из каких Reference-Project Methodology Proposals выведены
-> шаблоны коробки. Шаблоны написаны **сразу generalized** (Reference-Project-isms вычищены, см.
+> Эта папка — **карта происхождения**: из каких Methodology Proposals референс-проекта выведены
+> шаблоны коробки. Шаблоны написаны **сразу generalized** (проектно-специфичные детали вычищены, см.
 > SPEC §7), поэтому отдельных портов MP здесь нет — только трассируемость «шаблон → MP».
 > В проекты НЕ копируется (нет в `MANIFEST.json`).
 

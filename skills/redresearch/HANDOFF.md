@@ -4,7 +4,7 @@
 
 ## Что это за skill
 
-`redresearch` — multi-agent research для Claude Code. По модели redplan: scoper решает дёшево, фан-аут ролей по mode, judge синтезирует. **Local-first** (на маке, не VPS1 — capacity и co-tenancy риски), 4 mode: lite/standard/heavy/ultra. Триггеры: «исследуй X», `/research <topic>`.
+`redresearch` — multi-agent research для Claude Code. По модели redplan: scoper решает дёшево, фан-аут ролей по mode, judge синтезирует. **Local-first** (на рабочей машине, не на общем VPS — capacity и co-tenancy риски), 4 mode: lite/standard/heavy/ultra. Триггеры: «исследуй X», `/research <topic>`.
 
 ## Архитектура (финальная после 3 итераций plan-panel)
 
@@ -19,7 +19,7 @@
 | Iteration | Mode | Verdict | Critical | Outcome |
 |---|---|---|---|---|
 | v1 | ultra | NEEDS-WORK | 9 | F1-F9 baseline (command injection, secrets, locks, OOM, disk) |
-| v2 (Phase A) | heavy | NEEDS-WORK | 11 | VPS1 capacity disaster discovered |
+| v2 (Phase A) | heavy | NEEDS-WORK | 11 | VPS capacity disaster discovered |
 | v3 (local-first pivot) | standard→heavy | NEEDS-WORK | 11→2/role | Convergent — accepted as checklist |
 
 Все артефакты сохранены в `$CLAUDECORE_PATH/.plan-panel/redresearch-v1/`.

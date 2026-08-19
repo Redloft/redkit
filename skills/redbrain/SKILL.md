@@ -110,7 +110,9 @@ janitor-прогон: узлы без связей, дубли-опечатки,
 
 4. ALIASES (после первого bootstrap или при добавлении новых)
    Haiku канонизирует имена в латиницу («диадок»→diadok) — кириллический
-   запрос без алиаса не найдёт узел. Сид-список golden/aliases.txt:
+   запрос без алиаса не найдёт узел. Свой список — golden/aliases.txt
+   (первый раз: cp golden/aliases.example.txt golden/aliases.txt).
+   ⚠️ aliases.txt в .gitignore — там реальные имена клиентов/людей, не коммитить.
    grep -v '^#' golden/aliases.txt | while IFS='|' read a c; do
      python3 lib/graphdb.py alias "$a" "$c"; done
    Новая частая сущность с ru-написанием → дописать строку в aliases.txt.
@@ -188,9 +190,9 @@ Phase 1 = плоский lookup + CTE-окрестность. PPR — тольк
 graph|backlog|calendar|diary|none одним Haiku-вызовом; проект — только из
 белого списка projects/*.md; diary → всегда private.
 
-**Мия** (= @Attunedbot, модуль `redcontrol/autopilot/mia.py`, callback-префикс
-`mia:` в approve_listener — у бота ОДИН getUpdates-консьюмер, вторых поллеров
-не заводить!): превью задач с ✅/❌ (`mia-dispatch.sh`, launchd com.redbrain.mia
+**Ассистент-превью** (приватный модуль оператора, не входит в redkit;
+callback-префикс `mia:` в approve_listener — у бота ОДИН getUpdates-консьюмер,
+вторых поллеров не заводить!): превью задач с ✅/❌ (`mia-dispatch.sh`, launchd com.redbrain.mia
 5 мин + хвост pull-inbox), по ✅ создаёт задачу в Трекере через
 tracker_rest.create_issue С READ-BACK → backlog routed.
 
@@ -254,7 +256,8 @@ promote.py scan [--ttl-days 30] [--min-episodes 2] [--notify]
   # ≥2 независимых эпизодов (разные дни ИЛИ каналы) → на confirmed;
   # user_statement → с 1 эпизода; model_inference с 1 — остаётся candidate.
   # Противоречие с активным confirmed → conflicts (ручной разбор, не авто).
-  # --notify → TG-карточка Игорю (@Attunedbot sender, op_env.sh-паттерн).
+  # --notify → карточка оператору через внешний хук REDBRAIN_NOTIFY_SENDER
+  #            (дефолт ~/.claude/hooks/redbrain-notify.sh; нет файла → пропуск).
 promote.py apply <proposal-id|path>   # перевести пачку ПОСЛЕ ✅ Игоря
 promote.py status                     # счётчики конвейера
 ```
@@ -326,7 +329,7 @@ lib/lock.py      — writer-lock 'redbrain' (promote/poller/ingest)
 lib/golden.sh    — прогон golden-набора (DoD)
 golden/queries.json        — 15 эталонных запросов, порог 12/15
 golden/relations-allow.txt — allowlist «презентных» relation (gate + asof; DRAFT до S3-калибровки)
-golden/aliases.txt         — ru↔en алиасы
+golden/aliases.example.txt — шаблон ru↔en алиасов (свой aliases.txt — gitignored)
 bridge/mac/calendar-poll.py — кэш календаря для present-context (launchd, 30 мин)
 tests/test_temporal.sh      — 20 unit-тестов протокола записи v3
 tests/test_promote.sh       — 16 тестов конвейера промоушена

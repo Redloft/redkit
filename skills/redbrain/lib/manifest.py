@@ -14,13 +14,18 @@ CLI:
   manifest.py resolve <source_id>  — резолв одного (scope из REDBRAIN_SCOPE)
   manifest.py audit                — резолюция ВСЕХ источников текущего scope: сколько правимо
 """
-import sys, os, json, glob, sqlite3
+import sys, os, re, json, glob, sqlite3
 
 HOME = os.path.expanduser("~")
 CC = os.environ.get("CLAUDECORE_PATH", "")
 CLAUDE_PROJECTS = os.path.join(HOME, ".claude", "projects")
-AUTOMEM = os.environ.get("REDBRAIN_AUTOMEM") or os.path.join(CLAUDE_PROJECTS,
-    "-Users-operator-Yandex-Disk-localized------------------ClaudeCore", "memory")
+# Claude Code мангит абсолютный путь проекта в имя папки (всё не-alnum → "-").
+# Выводим из CLAUDECORE_PATH вместо хардкода — портируемо и без имени пользователя.
+def _mangle(p):
+    return re.sub(r"[^A-Za-z0-9]", "-", p)
+
+AUTOMEM = os.environ.get("REDBRAIN_AUTOMEM") or (
+    os.path.join(CLAUDE_PROJECTS, _mangle(CC), "memory") if CC else "")
 
 SCOPE = os.environ.get("REDBRAIN_SCOPE", "work")
 _DIR = os.path.expanduser(os.environ.get("REDBRAIN_DB_DIR",

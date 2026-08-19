@@ -33,7 +33,7 @@ const runId      = A.run_id || 'unknown-run-id'
 const mode       = A.mode || 'standard'
 const MAX_ITERS  = Number(A.max_iters || 2)
 // Портируемость: caller (SKILL) может передать panel_path (install-путь); fallback — канон на этой машине.
-const PANEL = A?.panel_path || `${(typeof process !== 'undefined' && process.env && process.env.HOME) || '/Users/operator'}/.claude/skills/plan-panel/workflow/panel.js`
+const PANEL = A?.panel_path || `${(typeof process !== 'undefined' && process.env && process.env.HOME) || '~'}/.claude/skills/plan-panel/workflow/panel.js`
 // FABLE: Fable 5 ещё не доступен в API → предсказуемый фоллбэк на opus (planner-модель
 // до миграции). Единственная точка переключения — вернуть 'fable' когда выкатят.
 const FABLE = 'opus'  // ← 'fable' когда модель появится

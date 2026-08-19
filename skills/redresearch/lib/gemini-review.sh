@@ -20,8 +20,9 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exec op run --env-file=<(printf 'GEMINI_API_KEY=op://AI-Tokens/Gemini/credential\n') -- bash "$0" "$@"
 fi
 
-# Gemini гео-блокирует РФ (прямой → 400). proxy-host-FI SOCKS (TLS e2e, ключ на сервере не виден,
-# хелпер прогревает туннель). Fail-open: FI недоступен → PROXY пуст → прямой (RU → вероятен 400).
+# Gemini гео-блокирует РФ (прямой → 400). Зарубежный SOCKS-прокси оператора (TLS e2e,
+# ключ на сервере не виден, хелпер прогревает туннель). Fail-open: прокси недоступен →
+# PROXY пуст → прямой запрос (из РФ → вероятен 400).
 _GFI=~/.claude/skills/_shared/gemini-fi/fi-proxy.sh
 [ -f "$_GFI" ] && source "$_GFI" && PROXY=$(gemini_fi_proxy) || PROXY=""
 

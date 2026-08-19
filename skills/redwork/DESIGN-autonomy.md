@@ -146,6 +146,6 @@ Watch-петля — **детерминированная** (poll signals, бе�
 
 ## Остаток — классификация судьи
 - **implementation-DoD (→/finalize при сборке):** числовые дефолты в `lib/defaults.sh`, exit-коды, cred-lint regex, restore-point id format, точный migration-скрипт.
-- **empirical-unknown (→ staged live-verify на staging, precondition `rollback_validated_at`; НЕ панель/finalize):** C1 SSH+opcache rollback (opcache-кэш × прокси-success smoke × нагрузка); D2 signals на bare-metal nginx VPS1 — **p95 убран из MVP** (требует external APM), минимальный viable signal = tail `nginx access.log` → 5xx-rate; реально ли auto-rollback успевает при breach.
+- **empirical-unknown (→ staged live-verify на staging, precondition `rollback_validated_at`; НЕ панель/finalize):** C1 SSH+opcache rollback (opcache-кэш × прокси-success smoke × нагрузка); D2 signals на bare-metal nginx VPS — **p95 убран из MVP** (требует external APM), минимальный viable signal = tail `nginx access.log` → 5xx-rate; реально ли auto-rollback успевает при breach.
 - **repo-specific (config-time):** deploy/rollback/health доктрины сайта (`ai/<slug>-prod` ff-only по SSH + opcache) — в `.redwork.json`/контракте при подключении репо.
 - **future:** ML-слой риск-оценки поверх детерминированного; canary/percentage-rollout; внешний APM для p95.

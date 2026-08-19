@@ -1,0 +1,16 @@
+# redbrain seed-алиасы: ru↔en мост для частых сущностей (дизайн: entity-resolution Phase 1).
+# Формат: алиас | канон-имя.
+#
+# ЭТО ПРИМЕР. Скопируй в golden/aliases.txt и заполни СВОИМИ сущностями:
+#   cp golden/aliases.example.txt golden/aliases.txt
+# golden/aliases.txt в .gitignore — там имена ваших клиентов, людей и проектов,
+# он НИКОГДА не должен попадать в репозиторий.
+#
+# Загрузка: grep -v '^#' golden/aliases.txt | while IFS='|' read a c; do
+#             python3 lib/graphdb.py alias "$a" "$c"; done
+трекер|yandex tracker
+1пассворд|1password
+фейбл|fable
+хайку|haiku
+тильда|tilda
+клиент-пример|example-client

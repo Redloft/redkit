@@ -53,7 +53,7 @@ escalate() {
 
   # 4) emit-директива для СЕССИИ: дофаерить push + Трекер (bash не имеет этих инструментов)
   echo "$payload"
-  echo "‹ESCALATE-DIRECTIVE› channels: TG=$tg ; session→ PushNotification + (если CPMO-id) tracker issue_add_comment с reason_code+needs+run_path (без command-output)" >&2
+  echo "‹ESCALATE-DIRECTIVE› channels: TG=$tg ; session→ PushNotification + (если PROJ-id) tracker issue_add_comment с reason_code+needs+run_path (без command-output)" >&2
   return 0
 }
 

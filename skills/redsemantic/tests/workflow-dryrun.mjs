@@ -224,8 +224,8 @@ const main = async () => {
   // ── Scenario 11: existing-site (R-mode: recon + verify-offerings + structure-vs-routes + GSC-warning) ──
   console.log('── dry-run: existing-site (recon/verify-offerings/GSC-warning) ──')
   const s11 = await runScenario({
-    argsObj: { slug: 'example-project', mode: 'lite', topic: 'ретритный центр', region: 'Москва',
-      site_url: 'https://example-project.com', adapter_status: { 'search-console': { credentialed: true, returns_data: false, reason: 'property не привязана к OAuth' } } },
+    argsObj: { slug: 'example-retreat', mode: 'lite', topic: 'ретритный центр', region: 'Москва',
+      site_url: 'https://example.com', adapter_status: { 'search-console': { credentialed: true, returns_data: false, reason: 'property не привязана к OAuth' } } },
     scoperAdapters: ['suggest', 'wordstat'], nicheAnchors: ['ретрит', 'медитац', 'баня'], negativeRoots: [],
     harvestKeywords: Array.from({ length: 8 }, (_, i) => ({ phrase: `ретрит услуга ${i}`, freq: 50 + i })),
   })

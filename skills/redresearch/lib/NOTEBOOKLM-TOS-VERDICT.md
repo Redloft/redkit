@@ -29,7 +29,7 @@
 
 | Risk | Likelihood | Severity |
 |---|---|---|
-| Account suspension Google за reverse-engineered API | medium-high | HIGH (теряю access ко всем Google services под `REDACTED-EMAIL`) |
+| Account suspension Google за reverse-engineered API | medium-high | HIGH (теряю access ко всем Google services под основному Google-аккаунту оператора) |
 | API ломается без notice (notebooklm-py сами признают) | high | MEDIUM (нужно реписывать клиент) |
 | Legal exposure за upload scraped third-party content | low-medium | MEDIUM (copyright неясен для transformative AI use) |
 | Cookies expiry / re-auth headache | high | MEDIUM (UX боль) |

@@ -143,7 +143,10 @@ def scan(ttl_days=TTL_DAYS, min_episodes=MIN_EPISODES, notify=False):
 
 
 def _send_card(proposal, path):
-    """TG-карточка Игорю через существующий redcontrol-sender (@Attunedbot, op run)."""
+    """TG-карточка оператору через внешний sender-хук (опционально).
+
+    Путь задаётся REDBRAIN_NOTIFY_SENDER; если хука нет — тихо пропускаем.
+    Скрипт получает один аргумент: файл с текстом карточки."""
     lines = [f"🧠 RedBrain: {len(proposal['promote'])} факт(ов) на подтверждение"
              f" ({proposal['scope']})", ""]
     for x in proposal["promote"][:15]:
@@ -156,7 +159,7 @@ def _send_card(proposal, path):
     card = os.path.join(CACHE, f"card-{proposal['id']}.txt")
     with open(card, "w") as f:
         f.write("\n".join(lines))
-    sender = os.path.expanduser("~/.claude/skills/redcontrol/scripts/rc_digest_send.sh")
+    sender = os.path.expanduser(os.environ.get("REDBRAIN_NOTIFY_SENDER", "") or "~/.claude/hooks/redbrain-notify.sh")
     if os.path.exists(sender):
         subprocess.run(["bash", sender, card])
 

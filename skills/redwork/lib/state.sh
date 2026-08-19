@@ -23,7 +23,7 @@ KNOWN_MAX=1
 _data_root() { echo "${REDWORK_DATA_DIR:-$HOME/Library/Application Support/redwork/runs}"; }
 _lock_ttl()  { echo "${REDWORK_LOCK_TTL_SEC:-3600}"; }
 
-_slug() { printf '%s' "$1" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12; }   # shasum=macOS, sha1sum=Linux/VPS1
+_slug() { printf '%s' "$1" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12; }   # shasum=macOS, sha1sum=Linux/VPS
 
 # validate_no_secrets: keyword-детектор (не энтропия — иначе ложно бьёт по путям/SHA в task). См. secret-guard.sh.
 validate_no_secrets() {

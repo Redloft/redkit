@@ -32,7 +32,7 @@ DB = os.path.join(_DIR, f"{SCOPE}.db")
 # Функциональные (одно-значные на субъекта) отношения: >1 distinct dst = вероятное
 # противоречие/устаревание. НЕ включать многозначные (uses/contains/links_to/prefers/
 # practices/sport/core_value/health_flag/related_to/integrates_with) — они шумят
-# (проверено: «client-a uses 10», «игорь prefers 9» — норма, не противоречие).
+# (проверено: «acme uses 10», «игорь prefers 9» — норма, не противоречие).
 FUNCTIONAL_RELS = {
     "deployed_on", "hosted_on", "has_type", "replaces", "owned_by", "born_in",
     "former_spouse", "located_in", "runs_on", "primary_domain", "current_status",

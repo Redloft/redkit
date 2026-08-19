@@ -259,7 +259,7 @@ self_test() {
   # traversal в env → файла нет → reject
   if ( export REDWORK_CONFIG_FILE="$GOV/../nope/x.json"; lint "$S" >/dev/null 2>&1 ); then ok 1 "traversal на несуществующее должен reject"; else ok 0 ""; fi
 
-  # ───────── separate-git-dir fidelity (governance-архетип client-a) ─────────
+  # ───────── separate-git-dir fidelity (governance-архетип из боевого прогона) ─────────
   local SGD_WT SGD_GD; SGD_WT="$(mktemp -d)"; SGD_GD="$(mktemp -d)/gov.git"
   git init -q --separate-git-dir="$SGD_GD" "$SGD_WT"
   git -C "$SGD_WT" config user.email t@t; git -C "$SGD_WT" config user.name t

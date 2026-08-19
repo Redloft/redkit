@@ -139,12 +139,12 @@ def present_context(c):
 
 # deny-лист generic-узлов (частые слова + аббревиатуры из РЕАЛЬНЫХ данных work.db:
 # git/mac/vps/... существуют как узлы и матчатся впустую). Concept-single-word
-# дополнительно душит CONCEPT_FLOOR. Ценные короткие (beget/vps1/groq/plaud/
-# fable/reve/игорь) намеренно НЕ здесь.
+# дополнительно душит CONCEPT_FLOOR. Ценные короткие (имена хостингов, моделей,
+# устройств, людей) намеренно НЕ здесь — их держит каждый оператор у себя.
 _DEFAULT_STOP = ("api,code,git,ssh,json,url,mcp,hook,test,bash,python,agent,claude,"
     "skill,tool,note,data,text,user,name,type,work,scope,memory,graph,node,edge,"
     "repo,main,plan,mode,flow,run,job,card,gate,queue,judge,audio,video,cart,svg,"
-    "ssrf,inn,cpmo,mac,vps,xcode,project,proj,readme,"
+    "ssrf,inn,mac,vps,xcode,project,proj,readme,"
     "код,файл,задача,память,граф,хук,тест,агент,скилл,узел,связь,факт,система,"
     "проект,карточка,очередь,гейт,режим,задачи,поле")
 DENYLIST = set(filter(None, (os.environ.get("REDBRAIN_RECALL_STOP") or _DEFAULT_STOP).split(",")))

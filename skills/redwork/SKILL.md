@@ -34,7 +34,7 @@ truth) + `.redwork.json` + опц. `.redwork-autonomy.json` → VERIFY (lint+rol
 подписанным коммитом, A0′). Дальше прогоны читают артефакты, без повторного опроса. На старте обычного `/redwork`: если конфига
 нет → предложить `/redwork-init`; если есть → работать по нему (проверив консистентность `## redwork` ↔ JSON).
 
-## Старт (`/redwork <задача|CPMO-id|@plan.md> [--repo PATH] [режим N] [--auto-deploy]`)
+## Старт (`/redwork <задача|PROJ-id|@plan.md> [--repo PATH] [режим N] [--auto-deploy]`)
 ```bash
 L=~/.claude/skills/redwork/lib
 REPO="<--repo или cwd>"; MODE="<N|2>"
@@ -51,8 +51,8 @@ git -C "$REPO" switch -c "redwork/$SLUG" 2>/dev/null || git -C "$REPO" switch "r
 1. `PHASE=$(bash $L/state.sh get "$RD" .phase)`; `MODE=$(… .mode)`.
 2. Выполнить хендлер фазы (ниже). Каждое значимое действие → `events.sh append` (типизированно, без raw stdout).
 3. Успех фазы → `state.sh set_str "$RD" '.phase=$val' <next>`; `.phase_status=done`; **loop продолжает**.
-4. **Нужен человек** → `bash $L/escalate.sh "$RD" <REASON_CODE> "<needs_csv>" [detail]` → затем СЕССИЯ дофаерит push (PushNotification) + (если CPMO-id) `tracker` коммент; `state.sh unlock "$RD"`; **СТОП loop** (ждём `/redwork-resume`).
-5. `DONE` → `events gc`, `ledger.sh append`, отчёт, `tracker-done` (если CPMO), `state.sh unlock`; **СТОП loop**.
+4. **Нужен человек** → `bash $L/escalate.sh "$RD" <REASON_CODE> "<needs_csv>" [detail]` → затем СЕССИЯ дофаерит push (PushNotification) + (если PROJ-id) `tracker` коммент; `state.sh unlock "$RD"`; **СТОП loop** (ждём `/redwork-resume`).
+5. `DONE` → `events gc`, `ledger.sh append`, отчёт, `tracker-done` (если PROJ), `state.sh unlock`; **СТОП loop**.
 6. Бюджет: инкремент `.budget.llm_calls`; > `[IMPL-DEFAULT 20]` → escalate `BUDGET_EXCEEDED`.
 
 ## Хендлеры фаз (что делает сессия)

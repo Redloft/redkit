@@ -25,7 +25,7 @@ Project Context, который Claude Code разворачивает в кор
 - Каждый redloft-проект стартует с готовой методологией **и понятной инструкцией как по ней работать**.
 - Коробка **знает про проект**: стек, ICP/USP, security-правила (RLS/PII/secret-rotation), geo-edge.
 - Tier выбирается **автоматически** из сигналов redloft (без нового опроса, кроме апселла Tier 3/4).
-- Generalized core — Reference-Project-isms вычищены; коробка переиспользуема и потенциально open-source.
+- Generalized core — проектно-специфичные детали вычищены; коробка переиспользуема и потенциально open-source.
 
 ### Non-goals
 - НЕ строим отдельный репозиторий `claude-code-methodology-kit`. Коробка живёт в redloft.
@@ -68,7 +68,7 @@ redloft уже имеет паттерн **«гарантированных ор
 
 ## 3. Содержимое коробки по тиру (manifest + источник MP)
 
-Все файлы bilingual. `{{...}}` — плейсхолдеры (§4). Источник = generalized из 60 Reference-Project MP.
+Все файлы bilingual. `{{...}}` — плейсхолдеры (§4). Источник = generalized из 60 MP референс-проекта.
 
 ### Tier 0 — Foundation (всегда)
 | Файл | Содержание | Из |
@@ -220,9 +220,9 @@ const METHODOLOGY_PROMPT_STEP = [
 
 ---
 
-## 7. Generalization: что вычистить из Reference-Project MP
+## 7. Generalization: что вычистить из MP референс-проекта
 
-Убрать: доменные сущности (EAM, bookingService, specialists, addons) → `{{ENTITY}}`-примеры · пути Hetzner/Mac/IP → плейсхолдеры · Russian-only → bilingual · Reference-Project-specific Hard Rules (`AuthContext.tsx` и т.п.) → generic · ссылки на конкретные docs → относительные.
+Убрать: доменные сущности (EAM, bookingService, specialists, addons) → `{{ENTITY}}`-примеры · пути хостинга/Mac/IP → плейсхолдеры · Russian-only → bilingual · проектно-специфичные Hard Rules (`AuthContext.tsx` и т.п.) → generic · ссылки на конкретные docs → относительные.
 Маппинг tier→MP: Tier1 MP-001/005 · Tier2 MP-004/005/029/034 · Tier3 MP-011/018/020 · Tier4 MP-050/052/057 · Cross MP-009/013/028.
 
 ---
@@ -240,14 +240,14 @@ const METHODOLOGY_PROMPT_STEP = [
 | A7 | **Exit-коды** 0/1/2/3 по §5.2; caller трактует 3 как soft-warn |
 | A8 | **Injection-фикстура** (апострофы, backticks, `$`, кириллица, YAML-injectible) проходит через python3-substitution без поломки/инъекции |
 | A9 | **Idempotency**: повторный запуск без `--force` не перетирает; `tasks/pending/` skip-if-nonempty |
-| A10 | smoke для tier 0–2; Tier 3 при `--tier3`; grep-gate Phase 1 (0 Reference-Project/AuthContext/Hetzner хитов); MANIFEST-vs-filesystem полнота |
+| A10 | smoke для tier 0–2; Tier 3 при `--tier3`; grep-gate Phase 1 (0 проектно-специфичных хитов); MANIFEST-vs-filesystem полнота |
 | A11 | Шаблоны bilingual (EN + RU comment) |
 
 ---
 
 ## 9. Фазы реализации
 
-- **Phase 1a — Audit**: протегировать 60 MP, выписать все Reference-Project-строки, отобрать ~20 MP для Tier 0–2. Grep-gate-список. (≈1 ч)
+- **Phase 1a — Audit**: протегировать 60 MP, выписать все проектно-специфичные строки, отобрать ~20 MP для Tier 0–2. Grep-gate-список. (≈1 ч)
 - **Phase 1b — Generalize**: вычистка §7 → `core-MPs/`; grep-gate проходит (0 хитов). (≈10 ч)
 - **Phase 2 — Templates**: `methodology-kit/tier-0..2/` bilingual + `START-HERE.md` + `rls-bootstrap.sql` + `MANIFEST.json`. **Гейт: DR-8/DR-9 задокументированы ДО написания шаблонов.**
 - **Phase 3 — Assembler**: `lib/methodology.sh` (atomic §5.1 + exit-коды §5.2 + degradation §5.3 + python3-subst §5.4 + idempotency §5.5) + hermetic smoke (A1/A6/A7/A8/A9).

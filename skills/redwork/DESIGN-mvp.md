@@ -13,7 +13,7 @@ output-capture-secrets, retention-инвариант, reason_code-enum. Оста
 Убрать ручное «держание» конвейера. Человек — только на реальных развилках. Понятные задачи идут до прода сами.
 
 ## Инвокация
-`/redwork <задача | CPMO-id | @plan.md> [--repo <path>] [режим 1|2|3] [--auto-deploy]`. Режим из NL, default 2.
+`/redwork <задача | PROJ-id | @plan.md> [--repo <path>] [режим 1|2|3] [--auto-deploy]`. Режим из NL, default 2.
 
 ## Режимы (default 2)
 1 «аккуратный» (✋ на каждой границе); 2 «мягкий» (авто→✋dev→авто→✋прод); 3 «автопилот» (всё сам, человек только эскалация-по-сомнению + high-risk деплой). **Эскалация-по-сомнению — safety floor во всех режимах.**
@@ -53,7 +53,7 @@ output-capture-secrets, retention-инвариант, reason_code-enum. Оста
 gates(auto|list), e2e{cmd,pass_threshold}, staging{url:null}, deploy{argv,env[op://],smoke{cmd,expected_status_code,expected_response_contains},rollback{argv,timeout_sec,on_failure_action,max_manual_rollback_wait_minutes},timeout_sec}, risk{add_human_globs,max_auto_files}, monitoring{alert_channels,signals,post_deploy_watch_minutes}. Без файла→detect-gates+спросить deploy один раз. **staging.url=null→** smoke=skipped(+warning), деплой-инвариант на local/docker-smoke при low, **режим3→2 для P5**.
 
 ## Эскалация (3 канала, строгая схема, без секретов)
-`lib/escalate.sh` принимает ТОЛЬКО `{slug,phase,reason_code(enum),needs:[{need_type,detail_code}],run_path,ts}` — без command-output/PII/task-текста. `need_type` детерминирован из `reason_code`. **Per-channel strip перед каждым каналом.** push+TG `@rltimebot`+Трекер(если CPMO-id). per-channel timeout, «доставлено ≥1»=успех иначе локальный лог+retry. `/redwork-resume {slug,human_decision:approve|reject|answer,answer?}`.
+`lib/escalate.sh` принимает ТОЛЬКО `{slug,phase,reason_code(enum),needs:[{need_type,detail_code}],run_path,ts}` — без command-output/PII/task-текста. `need_type` детерминирован из `reason_code`. **Per-channel strip перед каждым каналом.** push+TG `@rltimebot`+Трекер(если PROJ-id). per-channel timeout, «доставлено ≥1»=успех иначе локальный лог+retry. `/redwork-resume {slug,human_decision:approve|reject|answer,answer?}`.
 
 ## Machine contracts (границы компонентов)
 Adapter-обёртки (`lib/adapters/<skill>.sh`) для finalize/audit-site/tracker/plan-panel возвращают `{exit_class: ok|infra_error|verdict_fail, verdict?, artifacts_path, machine_summary}` — **infra-error отличается от verdict-fail** (infra→retry/escalate, не «провал ревью»). `live_verify_dod:[{check,type,passed}]` — общий формат P4→P6.
