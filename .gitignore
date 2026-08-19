@@ -15,3 +15,10 @@ __pycache__/
 # Приватные данные оператора — НИКОГДА не публикуем
 **/golden/aliases.txt
 **/docs/review/
+**/roadmap/
+**/bridge/mac/state/
+**/tests/golden/live-*
+**/jobs.yaml
+!**/jobs.example.yaml
+
+core/publish-gate.names

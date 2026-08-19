@@ -25,7 +25,42 @@ redkit/
     redbrain/           # граф-память: SQLite-граф + темпоральные слои (standalone, без core-dep)
     redanalyst/         # настройка/аудит веб- и сквозной аналитики Метрика+Директ (standalone, без core-dep)
   install.sh
+  core/publish-gate.sh  # проверка публичной поверхности перед публикацией
 ```
+
+## Публикация: обязательный гейт
+
+redkit публичный, но собирается из `~/.claude/skills`, где живут реальные данные
+оператора (IP, имена клиентов, почта, домашние пути). Перед любым пушем:
+
+```bash
+bash core/publish-gate.sh          # всё под git
+bash core/publish-gate.sh --staged # только staged
+```
+
+Повесить на pre-commit, чтобы не забывать:
+
+```bash
+printf '#!/bin/sh\nexec bash core/publish-gate.sh --staged\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+Первый запуск в свежем клоне предупредит, что список приватных имён не задан:
+
+```bash
+cp core/publish-gate.names.example core/publish-gate.names   # и заполнить своим
+```
+
+`publish-gate.names` в `.gitignore` — перечень имён клиентов сам по себе
+коммерческая тайна, в публичном скрипте его быть не может. Без файла проверка
+имён не молчит, а громко сообщает, что пропущена.
+
+Ложное срабатывание на заведомом плейсхолдере → добавить ERE в
+`core/publish-gate.allow`. Реальное значение туда **не добавляют** — его обобщают.
+
+⚠️ Если приватное уже улетело в историю, `git push --force` НЕ спасает: GitHub
+держит объекты достижимыми через `refs/pull/*`. Помогает только пересоздание
+репозитория.
 Каждый скилл: `lib/<kernel>.sh` — симлинк на `../../../core/<file>` (резолвится и в репо, и после install в `~/.claude/core`). `deps.txt` — runtime-скиллы, которые он вызывает.
 
 ## Граф зависимостей
