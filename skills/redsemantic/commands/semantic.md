@@ -18,7 +18,7 @@
    Сразу сохрани `wf_runId`: `set_workflow_id "$RUN_DIR" "<wf_runId>"`.
 6. **Пиши артефакты** из `result.artifacts` через Write в `$RUN_DIR/`:
    `keyword_universe.jsonl, clusters.json, structure.json, content_plan.json, entities.json, linking_map.json, semantic.md, scope.json, learnings.entry.json`. Затем `write_status "$RUN_DIR" done completed 0`.
-   **Петля самоулучшения (push):** `[ -f "$RUN_DIR/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redsemantic "$(cat "$RUN_DIR/learnings.entry.json")" || true` — meta-критик отметил системные пробелы процесса.
+   **Петля самоулучшения (push):** `[ -f "$RUN_DIR/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redsemantic "$(cat "$RUN_DIR/learnings.entry.json")" --entry-point semantic || true` — meta-критик отметил системные пробелы процесса.
 7. **Покажи:** semantic.md (key_claims) + verdict/coverage + кол-во ключей/кластеров + живые адаптеры (degraded/model-fill если были) + путь. Если `degraded` из-за незаполненных кредов — напомни заполнить Wordstat/DataForSEO в 1Password.
 
 ## Управление (через `lib/manage.sh`)

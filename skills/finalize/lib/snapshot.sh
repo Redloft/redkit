@@ -42,8 +42,7 @@ self_test() {
   git -C "$repo" config user.email t@t; git -C "$repo" config user.name t
   printf 'base\n' > "$repo/a.txt"; git -C "$repo" add -A; git -C "$repo" commit -qm init
   # незакоммиченное изменение с секретом
-  _SK="sk-""ABCD1234efgh5678ijkl9012mnop"  # split literal (push-protection safe)
-  printf 'base\nnew line key=%s\n' "$_SK" > "$repo/a.txt"
+  printf 'base\nnew line key=sk-''ABCD1234efgh5678ijkl9012mnop\n' > "$repo/a.txt"
   local pd="$T/run"; mkdir -p "$pd"
   local n; n="$(snapshot "$repo" "$pd" working)"
   [ "$n" = "1" ] || { echo "✗ expected 1 changed file, got $n"; fail=1; }
@@ -51,6 +50,20 @@ self_test() {
   grep -Eq 'sk-[A-Za-z0-9]' "$pd/diff.patch" && { echo "✗ secret leaked into diff.patch"; fail=1; }
   grep -q '‹REDACTED' "$pd/diff.patch" || { echo "✗ strip didn't run on diff"; fail=1; }
   grep -qx 'a.txt' "$pd/changed_files.txt" || { echo "✗ changed_files.txt wrong"; fail=1; }
+  # ── ИМЕНА ФАЙЛОВ В ЗАГОЛОВКАХ ДИФА (2026-08-19) ─────────────────────────────
+  # Дефект: Shannon-эвристика strip-а съедала пути ("/" склеивал сегменты в один
+  # высокоэнтропийный токен), и роли /finalize на КАЖДОМ прогоне получали диф, в котором
+  # не видно, к какому файлу относится хунк. Проверяем на вложенном пути — плоский a.txt
+  # слишком короткий, чтобы поймать регресс.
+  mkdir -p "$repo/skills/_shared/external-judge"
+  printf 'ok\n' > "$repo/skills/_shared/external-judge/config.sh"
+  git -C "$repo" add -A; git -C "$repo" commit -qm nested
+  printf 'ok\nchanged\n' > "$repo/skills/_shared/external-judge/config.sh"
+  local pd3="$T/run3"; mkdir -p "$pd3"; snapshot "$repo" "$pd3" working >/dev/null
+  grep -q 'skills/_shared/external-judge/config.sh' "$pd3/diff.patch" \
+    || { echo "✗ путь файла уничтожен strip-ом в заголовке дифа (роли не увидят, что за файл)"; fail=1; }
+  grep -q '‹REDACTED' "$pd3/diff.patch" \
+    && { echo "✗ ложная редакция в дифе без секретов"; fail=1; }
   # empty diff case
   git -C "$repo" add -A; git -C "$repo" commit -qm change
   local pd2="$T/run2"; mkdir -p "$pd2"

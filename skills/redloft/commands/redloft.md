@@ -81,7 +81,7 @@ set_workflow_id "$PD" "<wf_runId>"
 1. **`result.artifacts`** = `{relpath: content}` (файлы уже с YAML-header). Для каждого → **Write** в `$PD/<relpath>` (research/report.md, planning/…, semantic/… [semantic.md + keyword_universe.jsonl/clusters.json/structure.json/content_plan.json/entities.json/linking_map.json], sitemap/…, seo/…, content/…, design/…, tz.md, prompt.md, reviews/R*.md).
 2. **`result.stage_headers`** = `[{artifact_type, stage_id, source_stage, key_claims, path}]`. Для каждого → `register_artifact "$PD" <stage_id> <artifact_type> <path> <source_stage> '<key_claims JSON>'` + `set_stage "$PD" <stage_id> done` (или `skipped`/`failed`).
 3. **`result.reviews`** = `{R1,R2,R3}`. Для каждого → `set_review "$PD" <gate> <verdict> <confidence> <iteration> <escalated> "<notes>"`. При `escalated=true` стадия-источник → `set_stage … escalated`.
-4. **Петля самоулучшения (push):** `result.artifacts['learnings.entry.json']` записан в `$PD/`. Затем: `[ -f "$PD/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redloft "$(cat "$PD/learnings.entry.json")" || true` — meta-критик отметил системные пробелы пайплайна.
+4. **Петля самоулучшения (push):** `result.artifacts['learnings.entry.json']` записан в `$PD/`. Затем: `[ -f "$PD/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redloft "$(cat "$PD/learnings.entry.json")" --entry-point redloft || true` — meta-критик отметил системные пробелы пайплайна.
 
 **Секрет-чек перед показом**: `grep -RInE 'sk-|AIza|ghp_|op://|eyJ' "$PD" && echo "🚨 SECRET LEAK"` — 0 hits (§6).
 
@@ -199,6 +199,55 @@ set_workflow_id "$PD" "<wf_runId>"
   Затем `aggregate_feedback <stage>` → если `solidify_candidate=true`, предложи `/redloft-solidify <stage>`. Спроси пользователя про дополнительный feedback по этапам.
 
 ---
+
+## `/redloft-onboard <название|slug>` — онбординг рабочей папки проекта
+
+> Отдельный от пайплайна flow: заводит **рабочую папку проекта на Яндекс.Диске** по методике Red Loft (донор `ШАБЛОН ПРОЕКТА/`) + карточки во всех слоях RedControl/ClaudeCore. Это НЕ local-first артефакты (`$PD`) — это договорно-организационный каркас. Типичный вход: чат с пультом, пользователь **сбросил все наработки** (ТЗ, переписку, брифы, ссылки) и просит «заведи проект».
+
+### Шаг 1 — Slug + имя папки
+`$ARGUMENTS` = название проекта (кириллица ок) + опц. `--slug <slug>`, `--folder "<Имя Папки>"`.
+- `SLUG` — из `--slug` или транслитерация названия (та же таблица, что в §Шаг 2 основного flow), `^[a-z0-9-]{1,60}$`.
+- `FOLDER` — из `--folder` или человекочитаемое название как есть (папка под `ПРОЕКТЫ/`).
+- Проверь коллизии: если `00_RedControl/projects/<slug>.md` уже есть — спроси, дополняем или новый slug.
+
+### Шаг 2 — Развернуть донор (детерминированно)
+```bash
+PROJECT_DIR=$(bash ~/.claude/skills/redloft/lib/onboard.sh "$SLUG" "$FOLDER")   # echoes путь папки
+```
+`onboard.sh` разворачивает `Red Loft/` + `sync-docs.skill` + скелет `Документы/`+`Материалы/`, не затирая заполненные инстансы. **Collision-guard**: если папка уже существует → exit 3 (не мёржим вслепую). Для ре-синка методики в существующий проект — флаг `--resync`. (Корень — `REDLOFT_WORKROOT`, дефолт `~/Мой диск/РАБОЧЕЕ`.)
+- exit-коды: `0` ок · `1` невалидный slug/folder · `2` нет WORKROOT/донора · `3` папка существует (нужен `--resync`) · `64` мало аргументов.
+- **Коллизия — enforced в коде** (не только в этом промпте): при exit 3 спроси пользователя — другое имя (новый проект) или `--resync` (обновить методику в существующем).
+
+### Шаг 3 — Разобрать наработки (materials-first)
+Прочитай всё, что пользователь сбросил (файлы в папке проекта, вставленный текст, ссылки — client-URL через `validate_url`, DR-7). Извлеки: суть проекта, заказчик/контакты, стадия (переговоры/договор/в работе), домены, ключевые ограничения, реф-сайты, открытые вопросы.
+
+**Разложи входящие файлы по канону (не оставляй в корне папки):**
+- ТЗ / бриф / транскрипт встречи → `Материалы/Брифы/`
+- Исследования / аудиты / референсы → `Материалы/Исследования/`
+- Примеры договоров / юр-доки от клиента → `Документы/`
+- Корень папки проекта держим чистым: там только `CLAUDE.md`, `Red Loft/`, `sync-docs.skill` и каркас `Документы/`+`Материалы/`.
+
+> Двигай файл ДО генерации карточек (Шаг 4), чтобы ссылки сразу указывали на финальный путь. **Ссылайся на материалы по конвенции папки** (напр. «ТЗ — в `Материалы/Брифы/`»), а не хардкодь полный путь в трёх карточках — при переезде файла не придётся править ссылку в `CLAUDE.md` + RC + ClaudeCore.
+
+### Шаг 4 — Сгенерировать слои (Write, не агенты)
+1. **Проектный `CLAUDE.md`** в `$PROJECT_DIR` — контекст + процесс (первые шаги → `Red Loft/00-Цикл-проекта/README.md`), правила (наружу только с OK, секреты в 1Password, Трекер до договора не заводим). Шаблон — как у Эденси Резорт.
+2. **RedControl** `00_RedControl/projects/<slug>.md` (+ `private/<slug>.md`) по `_templates/project-card.md`. `dm_contacts` — контакты из наработок. `claudecore: <slug>`, `folder: "ПРОЕКТЫ/<FOLDER>"`.
+3. **ClaudeCore** `projects/<slug>.md` по `_template.md` — полный разбор + связи.
+4. **Память**: карточка проекта (`type: project`) + строка в `MEMORY.md`.
+
+> **Скелет frontmatter (снять boilerplate + гарантия схемы)**: перед заполнением карточек RC/ClaudeCore получи предзаполненный frontmatter (slug/folder/date/name) и допиши по нему смысловое тело:
+> ```bash
+> bash ~/.claude/skills/redloft/lib/card-skeleton.sh rc "$SLUG" "$FOLDER" "<Имя>" > 00_RedControl/projects/$SLUG.md
+> bash ~/.claude/skills/redloft/lib/card-skeleton.sh cc "$SLUG" "$FOLDER" "<Имя>" > projects/$SLUG.md
+> ```
+> Поля с `# TODO caller` (status, client, dm_contacts, domain_primary, …) требуют понимания наработок — заполняет LLM, не скрипт.
+
+### Шаг 5 — Отчёт
+Покажи: путь папки, что развёрнуто (Red Loft + скелет), созданные карточки/слои, куда разложены наработки, **текущий этап цикла** и предложенный следующий шаг. Трекер не заводим до договора.
+
+> **Корректировка существующих проектов**: `onboard.sh <slug> "<Папка>" --resync` = ре-синк `Red Loft/` из обновлённого донора (инстансы `Документы/`/`Материалы/` не трогает). Полезно после прокачки методологии в `ШАБЛОН ПРОЕКТА/`. Без `--resync` существующая папка = exit 3.
+>
+> **Массовый ре-синк после прокачки донора**: `bash ~/.claude/skills/redloft/lib/resync-all.sh` — **version-aware** dry-run: сравнивает `donor_version` копии (её `Red Loft/MD-индекс.md`) с донором и печатает per-project статус `up-to-date` / `drift vX→vY`. `--apply` ре-синкает **только дрейфующие**; `--all` форсит все онбординутые (если правка методики не бампнула `donor_version`). Легаси-папки без `Red Loft/` не трогает. Делегирует канон `onboard.sh --resync`. **После прокачки донора не забудь поднять `donor_version` в `MD-индекс.md`** — иначе version-aware не увидит дрейф (или гони `--all`).
 
 ## Управляющие команды (через `lib/manage.sh` + `lib/context.sh`, без агентов)
 

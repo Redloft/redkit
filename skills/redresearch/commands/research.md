@@ -88,7 +88,7 @@ set_workflow_id "$RUN_DIR" "<wf_runId из ответа Workflow>"
 source ~/.claude/skills/redresearch/lib/heartbeat.sh
 write_status "$RUN_DIR" done completed 0
 # Петля самоулучшения (push): meta-критик уже отметил системные пробелы процесса → в ledger
-[ -f "$RUN_DIR/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redresearch "$(cat "$RUN_DIR/learnings.entry.json")" || true
+[ -f "$RUN_DIR/learnings.entry.json" ] && bash ~/.claude/skills/plan-panel/lib/ledger.sh append ~/.claude/skills/redresearch "$(cat "$RUN_DIR/learnings.entry.json")" --entry-point research || true
 ```
 **Секрет-чек перед показом** (если есть run.log от background): `grep -iE 'sk-|AIza|ghp_|op://|eyJ' "$RUN_DIR/run.log" && echo "🚨 SECRET LEAK"` — должно быть 0 hits.
 

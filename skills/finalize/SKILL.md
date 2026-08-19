@@ -55,22 +55,68 @@ Workflow({scriptPath: "~/.claude/skills/finalize/workflow/stabilize.js",
 - `--review-only` или `GATES==[]` → пропустить, `stabilize_report = {stable:"unknown", rounds:0, remaining_failures:[], fixer_warnings:[]}`.
 
 ### 2. Панель код-ревью (Workflow)
+**Архивариус (RedBrain-заземление, рекомендуется):** `bash ~/.claude/skills/redbrain/lib/archivist.sh "$PD/diff.patch"` → stdout захватить как `memory_brief` (пусто = ок). Оркестратор зовёт ДО Workflow (recall.py нужен диск/SQLite; subprocess, НЕ import). scope work fail-closed, fail-open. Пропустить при `--no-memory`. → «известные грабли/решения по этому проекту» в роли+judge.
+
+**Fact-grounder (свежие веб-факты, рекомендуется, non-blocking):** `python3 ~/.claude/skills/_shared/fact-grounder/ground.py < "$PD/diff.patch"` → stdout захватить как `research_brief` (пусто = tier none, ок). Тоже ДО Workflow (движки — shell). Дёшево (none→0 вызовов; иначе до 5 Tavily ~$0.04, scrub+бюджет-гард внутри). НЕ спрашивать (стоимость мала). Пропустить при `--no-research`/`--lite`. → роли+judge ловят freshness-conflict (EOL-версия/депрекейт-API/CVE в diff'е). Передать в Workflow args как `research_brief`.
 ```
 Workflow({scriptPath: "~/.claude/skills/finalize/workflow/finalize.js", args: {
-  diff_text: <содержимое PD/diff.patch>, changed_files: [...],
+  diff_text: <содержимое PD/diff.patch>, changed_files: [...], memory_brief, research_brief,
+  canon_lexicon: <`jq -c '[.lenses[]|{key,role,title}]' ~/.claude/skills/finalize/lenses/canon.json`>,
   stabilize_report, gates_found: GATES!=[], mode, project_slug, cwd, project_dir: PD, timestamp, run_id
 }})
 ```
 scope(по diff) → роли в `review_mode=code` (overlay `plan-panel/_shared.md §10.2`) → judge.
 **Инвариант**: `stable ∈ {false, unknown}` ⇒ verdict ≠ SHIP (enforced и в judge-промпте, и в оркестраторе).
 
+### 2.5 Внешние судьи (ВЫЗЫВАТЬ ВСЕГДА, кроме `--lite`; non-blocking)
+Независимый второй голос вне Claude-семейства (OpenAI/GLM/Kimi) на том же diff.
+Caller-level (op run + curl вне Workflow-песочницы), НЕ SPOF — сбой любого судьи не ломает finalize.
+
+⚠️ **Шаг не опциональный — решают тумблеры, не ты.** `panel.sh` сам проверяет
+`ej_enabled_providers()` и при выключенных тумблерах печатает одну строку «выключены» с exit 0.
+Пока формулировка была «опционально», шаг просто выпадал: тумблеры стоят
+`openai,glm,kimi` с 2026-07-20, а последняя запись в `ledger.jsonl` — 2026-07-22 при
+десятках прогонов после. Дешёвая безусловная команда надёжнее уговоров.
+```bash
+E=~/.claude/skills/_shared/external-judge
+# $CV = verdict Claude-панели из judge.json (SHIP/FIX-FIRST/NEEDS-WORK)
+bash "$E/panel.sh" "$PD/diff.patch" "$CV" --out "$PD"   # → cross-model.md + cross-model.json в $PD
+```
+- Скраб (fail-closed) и денилист (ИНН/реквизиты/sensitive-проекты) + инфра-редакция — **внутри** адаптера, до отправки.
+- Вывод `panel.sh` (markdown-блок «Внешние судьи» + подсветка расхождений с Claude) вставить в summary шага 3.
+- Включение: `EJ_ENABLE="openai,glm"` в env ИЛИ `_shared/external-judge/toggles.env`. Kill: `EJ_KILL=1` / файл `KILL`. Budget-cap: `EJ_BUDGET_USD_DAY`.
+- Если в diff есть чувствительное (финансы/PII проекта) — судья сам заблокируется (denylist-block в блоке).
+
 ### 3. Артефакты + summary
 - Записать `artifacts{}` из workflow в `$PD` (scope.json, reviews.json, review.md, judge.json, judge.md, stabilize.json, metadata.json, learnings.entry.json).
-- **Авто-капчур в ledger (петля самоулучшения, push не pull):** `bash $B/ledger.sh append ~/.claude/skills/finalize "$(cat "$PD/learnings.entry.json")"` — копит methodology-находки meta-критика для scheduled-solidify. НЕ требует ручного `/panel-feedback`.
+- **Авто-капчур в ledger (петля самоулучшения, push не pull):** `bash $B/ledger.sh append ~/.claude/skills/finalize "$(cat "$PD/learnings.entry.json")" --entry-point finalize` — копит methodology-находки meta-критика для scheduled-solidify. НЕ требует ручного `/panel-feedback`.
 - `checkpoint.sh set "$PD" '.status="complete" | .phase="judge"'`.
 - Central mirror — **только metadata** (diff/reviews с кодом НЕ копировать; persist.sh уже пометил это).
 - Показать пользователю: **verdict** (SHIP/FIX-FIRST/NEEDS-WORK) + stable? + что чинил stabilize + top-5 actions + conflicts/gaps + путь к artifacts. Не вываливать diff.
+- **Если запускались внешние судьи (2.5)** — под verdict'ом вставить содержимое `$PD/cross-model.md` (блок «Внешние судьи» + подсветка расхождений). Расхождение внешнего судьи с Claude-панелью = сигнал слепой зоны, не игнорировать.
 - **Если `pending_live_verify=true`** (есть empirical-unknown) — verdict показать как **`SHIP — ⚠ pending live-verify`** и ОБЯЗАТЕЛЬНО вывести секцию `live_verify_dod[]`: это runtime-проверки, которые code-review структурно не закрывает (стык внешней системы × тип поля × поведение движка). Явно сказать пользователю: «мерджить можно, но НЕ считать готовым, пока не прогнан live-verify».
+
+### 4. Ф3-confirm redcost (опционально, если finalize закрывает БИЛЛИНГ-задачу проекта)
+Когда финалим работу, привязанную к задаче Трекера биллинг-проекта (любой проект с договором) и
+задача реально закрывается — прогнать финальный расчёт redcost (skill `redcost` §Ф3):
+1. Резолв договора; собрать факт-часы по ролям «как реальный спец» (авто-черновик, Игорь правит).
+2. `final.prepare(issue, summary, contract, approved_roles, date, estimate_hours, delta_reason)` →
+   клиентский комментарий (цензор) + writer_task.
+3. Показать Игорю ИТОГ (роли-часы, дельта к прогнозу Ф1, остаток лимита) → **OK-гейт**.
+4. `writer.write_task_result` / `tracker_adapter` → worklog (`start`!) + комментарий (guard старой схемы,
+   идемпотентность, half-success). Round-trip GET+assert.
+5. **ТОЛЬКО при `overall='written'`** → `final.confirm_after_write(issue, approved_roles, date)` →
+   `predicted→approved` + дельта → сохранить `data/precedents.json`. База учится (Ф1 будущих задач точнее).
+Пропустить, если finalize не про оплачиваемую задачу (внутренний скилл/инфра — как этот redcost-финал).
+
+### 5. Guides-freshness check (если работа затрагивает сайт проекта с Гайдом)
+Если финализируемая работа — по САЙТУ проекта, у которого есть Гайд (База знаний в bridge
+mini-app — у части клиентских проектов он есть), прогнать чек **«изменил сайт → нужна ли правка гайда?»**:
+появился ли новый функционал/блок, изменился флоу, новое место в админке, новый тип инцидента,
+новая интеграция. Если реально нужен **новый раздел/статья** (или правка существующей) —
+**проактивно предложить Игорю** конкретно (какой раздел/статью + тезисы); контент сам не пишу,
+предлагаю, решение за Игорём. Пропустить на инфра/тулинге (как сама сборка движка гайдов) и если
+для пользователя гайда ничего не изменилось (не спамить). См. память `guides-freshness-check`.
 
 ## Правила
 - **НИКОГДА не коммитить/не пушить самому** — только чинить рабочее дерево и ревьюить. Коммит — решение пользователя.

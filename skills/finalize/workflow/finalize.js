@@ -14,21 +14,42 @@ export const meta = {
   phases: [
     { title: 'Scope', detail: 'Haiku scoper по содержимому diff выбирает роли' },
     { title: 'Review', detail: 'роли ревьюят diff (review_mode=code) параллельно' },
-    { title: 'Judge', detail: 'Judge (opus до Fable 5): verdict + stable-aware (не SHIP если нестабильно)' },
+    { title: 'Judge', detail: 'Judge (Fable 5): verdict + stable-aware (не SHIP если нестабильно)' },
   ],
 }
 
-// FABLE: Fable 5 ещё не доступен в API → предсказуемый фоллбэк на opus (judge-модель
-// до миграции). Единственная точка переключения — вернуть 'fable' когда выкатят.
-const FABLE = 'opus'  // ← 'fable' когда модель появится
+// FABLE: Fable 5 доступен в API с 2026-07-02 (проверено) — judge-модель.
+// Judge переведён на Opus 5 (finalize гоняется постоянно, ultra-режима нет).
+// Fable-константы больше нет — файл исключён из Fable-guard в health.sh.
+const JUDGE_MODEL = 'opus'
 
 const A = (typeof args === 'string' ? (() => { try { return JSON.parse(args) } catch { return {} } })() : args) || {}
 let diffText = A.diff_text || ''
+// RedBrain-контекст от архивариуса: оркестратор зовёт archivist.sh на diff+changed_files ДО
+// Workflow() и кладёт сюда. Пусто → finalize работает как раньше (fail-open).
+const memoryBrief = A.memory_brief || ''
+// Канон линз (Ф1): caller читает lenses/canon.json (симлинк на plan-panel/lenses) и передаёт
+// ИНЛАЙН — песочница Workflow без ФС. Пусто → свободный слаг, как до Ф1 (fail-open).
+const canonLexicon = A.canon_lexicon || ''
+const lensInstruction = canonLexicon
+  ? `=== КАНОН ЛИНЗ — выбирай lens_key ТОЛЬКО отсюда ===\n${canonLexicon}\n=== END КАНОН ===\n` +
+    `lens_key ОБЯЗАН быть одним из key выше (точное совпадение). Если ни одна линза реально не подходит — верни lens_key: "new:<kebab-слаг>" И обязательное поле lens_rationale (одной фразой, почему существующие не годятся).\n` +
+    `Свободные ключи без префикса new: уйдут в карантин и потеряются для петли. Похоже, но не точно → бери существующий key.\n`
+  : `lens_key — короткий стабильный kebab-слаг линзы (напр. 'type-impedance-on-write').\n`
+// fact-grounder: свежие внешние веб-факты по проверяемым утверждениям diff'а (ground.py, caller-level). Fail-open.
+const researchBrief = A.research_brief || ''
 if (!diffText && A.diff_path) {
   // Fallback: caller передал путь к файлу вместо содержимого (для больших diff'ов > ~50KB через args
-  // удобнее так). Читаем через scoper-агента (у workflow нет прямого fs API).
-  const readResult = await agent(`Прочитай файл ${A.diff_path} целиком и верни СЫРОЕ содержимое БЕЗ обёртки и комментариев. Если файл пустой — верни пустую строку.`, { label: 'read-diff', phase: 'Scope' })
+  // удобнее так — inline-строка с тяжёлым экранированием ломает JSON args). Читаем агентом (у
+  // workflow-песочницы нет прямого fs API). Агент возвращает СЫРОЙ текст с диска.
+  const readResult = await agent(`Прочитай файл по абсолютному пути ${A.diff_path} инструментом Read и верни его СЫРОЕ содержимое ПОЛНОСТЬЮ, БЕЗ какой-либо обёртки, префиксов, markdown-ограждений или комментариев. Верни в точности байты файла. Если файл реально пуст — верни пустую строку.`, { label: 'read-diff', phase: 'Scope' })
   diffText = (readResult || '').trim()
+  // Явно различаем «diff вообще не передан» и «diff_path задан, но пуст/нечитаем»: иначе
+  // невнятный empty-diff маскирует битый путь/пустой файл (диагностика finalize re-run).
+  if (!diffText) {
+    return { error: 'diff-path-unreadable', verdict: 'UNCERTAIN',
+             reason: `diff_path задан (${A.diff_path}), но чтение вернуло пусто — проверь путь и что файл не пуст` }
+  }
 }
 let changedFiles = A.changed_files || []
 if ((!changedFiles || changedFiles.length === 0) && A.changed_files_path) {
@@ -83,7 +104,10 @@ const JUDGE_SCHEMA = {
   required: ['verdict', 'confidence', 'priority_actions', 'summary', 'final_verdict_reasoning'],
   additionalProperties: true,
   properties: {
-    verdict: { enum: ['SHIP', 'FIX-FIRST', 'NEEDS-WORK'] },
+    verdict: { enum: ['SHIP', 'FIX-FIRST', 'NEEDS-WORK'] },  // ⛔ enum НЕ трогать: redwork/lib/autonomy-gate.sh:135 сравнивает со строковым литералом "SHIP" fail-closed
+    // Ф4: вторая ось — классификация ОСТАТКА, а не замена вердикту. Аддитивно.
+    remainder_class: { enum: ['architectural', 'implementation', 'empirical', 'none'] },
+    verdict_label: { type: 'string' },
     confidence: { type: 'number' },
     findings: { type: 'array', items: {
       type: 'object', additionalProperties: true,
@@ -115,6 +139,7 @@ const CRITIC_SCHEMA = {
       properties: {
         role: { type: 'string', minLength: 1 },
         lens_key: { type: 'string', minLength: 1 },
+        lens_rationale: { type: 'string' },  // обязателен ТОЛЬКО при lens_key: "new:*"
         severity: { enum: ['critical', 'warning', 'suggestion'] },
         observation: { type: 'string', minLength: 1 },
         proposed_checklist_delta: { type: 'string', minLength: 1 },
@@ -221,13 +246,35 @@ log(`Scope: ${(scoper.scope_tags || []).join(', ')} · roles: ${reviewRoles.join
 
 // ===== Phase 2: REVIEW (review_mode=code) =====
 phase('Review')
+// СКВОЗНОЙ ПУНКТ (solidify 2026-08-19, тема judge/judge-covers-for-roles ×11 critical + security ×4).
+// Судья систематически ловил СВЯЗКИ, которых нет ни в одном чек-листе: каждая роль честно
+// проверяла свой слой и останавливалась на его границе. Живые примеры класса: правка общего
+// входного файла ломала уже разосланные наружу и закэшированные копии; ни одна роль не спросила,
+// что происходит ПОСЛЕ успешной записи в БД (доставка, уведомление); полнота доказательства
+// проверялась побайтово, а не по смыслу. Это не дефект отдельной роли — это ничья земля между
+// ролями, поэтому пункт живёт в ОБЩЕМ промпте, а не в семи чек-листах.
+const SEAM_CLAUSE =
+  'СКВОЗНАЯ ПРОВЕРКА (обязательна, помимо твоего чек-листа). Твоя зона ответственности кончается ' +
+  'раньше, чем последствия изменения. Ответь по каждому значимому изменению: (1) что происходит ПОСЛЕ ' +
+  'того, как описанный успех наступил — доставка, уведомление, следующий шаг, кто и как узнаёт, что ' +
+  'дальше с этим делают; (2) что СНАРУЖИ твоего слоя уже зависит от того, что меняется — уже разосланные ' +
+  'или закэшированные наружу копии, соседние продукты на общем коде, фоновые задания, потребители старых ' +
+  'версий, которых не обновить. Если на вопрос отвечает не твоя роль и не видно, чья — это finding, ' +
+  'а не повод промолчать: ровно такие связки судья регулярно добирает вместо ролей.'
+
 const reviewPrompt = (role, envelope, chunkNote) =>
+
   `Ты — ${role} из plan-panel в РЕЖИМЕ review_mode=code. Прочитай ${ROLES_DIR}/${role}.md (твой базовый чек-лист) И применяй overlay ${OVERLAY}:\n` +
   `— оцениваешь РЕАЛИЗОВАННЫЕ изменения (git diff), а не план;\n` +
   `— ищешь баги/регрессии/нарушенные инварианты/тех-долг В КОДЕ;\n` +
   `— каждый finding.ref ОБЯЗАН указывать путь:строку из diff, без literal-значений секретов;\n` +
-  `— заполни checked_files[] (какие файлы реально просмотрел; при нехватке контекста используй Read/codegraph по ${cwd}).\n` +
-  `${chunkNote}\n${envelope}\n\nВерни JSON по FINDINGS_SCHEMA.`
+  `— заполни checked_files[] (какие файлы реально просмотрел; при нехватке контекста используй Read/codegraph/rg по ${cwd}).\n` +
+  `— ЛИТЕРАЛЬНЫЙ ПРОХОД (rg/Grep, компаньон codegraph): по изменённым символам — найди РЕАЛЬНЫЕ использования/dead-код на удалённое, TODO/FIXME рядом, хардкод-значения и строки-похожие-на-секреты. codegraph — структура, rg — строки.\n` +
+  `${chunkNote}\n${envelope}\n` +
+  (memoryBrief ? `\n=== RedBrain-контекст (память Игоря: известные грабли/решения по проекту — сверь, не переоткрывай) ===\n${memoryBrief}\n=== END ===\n` : '') +
+  (researchBrief ? `\n${researchBrief}\n=== END ===\n` : '') +
+  `\n${SEAM_CLAUSE}\n` +
+  `\nВерни JSON по FINDINGS_SCHEMA.`
 
 // worst-verdict для мёржа чанков одной роли
 const VRANK = { FAIL: 3, 'NEEDS-WORK': 2, UNCERTAIN: 1, PASS: 0 }
@@ -274,10 +321,15 @@ const judge = await agent(
   `${!gatesFound ? '— гейты не обнаружены → отметь gap "нет автоматических проверок", но не понижай verdict только за это.\n' : ''}` +
   `— если remaining_failures непустой — это critical, FIX-FIRST.\n` +
   `— EMPIRICAL-UNKNOWN: если у любой роли есть finding с area "empirical-unknown" (баг на стыке runtime внешней системы × тип поля БД × поведение движка/ORM × прокси-success — это НЕ видно из diff), чистый SHIP запрещён. Если реального critical-для-фикса в diff нет → verdict остаётся SHIP, но ОБЯЗАТЕЛЬНО заполни live_verify_dod[] конкретными runtime-проверками (write→read-back assert, матрица граничных значений, live-verify на проде/стенде). Если есть и реальный critical в коде — FIX-FIRST как обычно. Это не закрывается ни новым кругом, ни code-review — только прогоном реального пути.\n\n` +
+  (memoryBrief ? `— MEMORY-CONFLICT: сверь дифф с RedBrain-контекстом (ниже) — противоречит ли он установленным фактам/решениям/граблям Игоря или переоткрывает решённое? Такой finding — critical/warning со ссылкой на source_doc.\n\n` : '') +
+  (researchBrief ? `— FRESHNESS-CONFLICT: сверь дифф с блоком «Свежие внешние факты» (ниже) — не опирается ли код на устаревшее (EOL-версия/депрекейт-API/известная CVE)? Блок — НЕвериф. веб-подсказка, на code-diff бывает шумной: поднимай finding ТОЛЬКО если факт ЯВНО и по делу противоречит коду (устаревшая зависимость/EOL), иначе игнорируй. Severity — suggestion (non-blocking): свежесть-хит НЕ гейтит вердикт по коду; приложи свежий факт + URL.\n\n` : '') +
   `=== STABILIZE REPORT ===\n${JSON.stringify(stab, null, 2)}\n=== END ===\n\n` +
   `=== ROLE REVIEWS ===\n${JSON.stringify(reviews.map(r => ({ role: r.role, verdict: r.verdict, findings: r.findings, summary: r.summary })), null, 2)}\n=== END ===\n\n` +
-  `${buildEnvelope(null)}\n\nВерни JSON по JUDGE_SCHEMA. final_verdict_reasoning объясни явно.`,
-  { label: 'judge', phase: 'Judge', model: FABLE, schema: JUDGE_SCHEMA }
+  `${buildEnvelope(null)}\n\n` +
+  (memoryBrief ? `=== RedBrain-контекст (память Игоря) ===\n${memoryBrief}\n=== END ===\n\n` : '') +
+  (researchBrief ? `${researchBrief}\n=== END ===\n\n` : '') +
+  `Верни JSON по JUDGE_SCHEMA. final_verdict_reasoning объясни явно.`,
+  { label: 'judge', phase: 'Judge', model: JUDGE_MODEL, schema: JUDGE_SCHEMA }
 )
 if (!judge) return { error: 'judge-failed', verdict: 'UNCERTAIN', reviews }
 
@@ -301,7 +353,8 @@ else if (hasEmpirical) log(`ℹ️  ${empiricalFindings.length} empirical-unknow
 const critic = await agent(
   `Ты — methodology-critic для /finalize. НЕ ищи новых багов в коде. Единственная задача: по уже собранным findings ролей и выводу судьи понять, не вскрыл ли какой-то finding ДЫРУ В ЧЕК-ЛИСТЕ САМОЙ РОЛИ — standing-проверку, которой у роли НЕТ, но должна быть, — а не просто дефект в этом конкретном коде.\n` +
   `Критерий разделения: «будь у роли такой пункт чек-листа, она ловила бы этот КЛАСС бага в ЛЮБОМ проекте» → methodology_finding. «Разовый баг именно здесь» → игнор.\n` +
-  `Для каждого верни: { role, lens_key (короткий стабильный kebab-слаг линзы, напр. 'type-impedance-on-write'), severity, observation (что роль системно упускает), proposed_checklist_delta (один новый пункт чек-листа, одной фразой) }.\n` +
+  `Для каждого верни: { role, lens_key, severity, observation (что роль системно упускает), proposed_checklist_delta (один новый пункт чек-листа, одной фразой) }.\n` +
+  lensInstruction +
   `Если методологических пробелов нет (все findings — про этот код) → methodology_findings: []. НЕ выдумывай ради заполнения.\n\n` +
   `=== JUDGE ===\n${JSON.stringify({ verdict, gaps: judge.gaps || [], conflicts: judge.conflicts || [], reasoning: judge.final_verdict_reasoning }, null, 2)}\n\n` +
   `=== ROLE FINDINGS ===\n${JSON.stringify(reviews.map(r => ({ role: r.role, findings: r.findings })), null, 2)}\n=== END ===\n\nВерни JSON по схеме.`,
@@ -313,6 +366,7 @@ if (methodologyFindings.length) log(`🧠 meta-critic: ${methodologyFindings.len
 const learningsEntry = {
   ts: timestamp, skill: 'finalize', run_id: runId, verdict,
   confidence: judge.confidence, stable: stab.stable,
+  remainder_class: judge.remainder_class || null,
   gaps: (judge.gaps || []).map(g => typeof g === 'string' ? g : (g.area || '')).filter(Boolean),
   conflicts_count: (judge.conflicts || []).length,
   empirical_count: empiricalFindings.length,

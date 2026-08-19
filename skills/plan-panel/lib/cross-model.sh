@@ -55,6 +55,7 @@ GEM_MAX_TIME="${GEM_MAX_TIME:-180}"
 # helper-missing: уважаем явный GEMINI_PROXY, иначе прямой (1080-фолбэк живёт внутри функции,
 # т.е. доступен только при наличии helper'а — осознанное сужение сломанной-установки edge).
 _GFI=~/.claude/skills/_shared/gemini-fi/fi-proxy.sh
+# shellcheck source=/dev/null  # путь вычисляется в рантайме (~/.claude/...); файл проверяется [ -f ] строкой ниже
 if [ -f "$_GFI" ] && source "$_GFI"; then
   gemini_fi_autodetect_proxy "cross-model"
 else
@@ -152,7 +153,7 @@ call_gemini() {
   payload=$(jq -nc --arg p "$PROMPT" '{
     contents: [{parts: [{text: $p}]}],
     generationConfig: {
-      temperature: 0.3,
+      temperature: 1.0,
       responseMimeType: "application/json"
     }
   }')

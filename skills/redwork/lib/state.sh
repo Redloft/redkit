@@ -17,13 +17,15 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/secret-guard.sh"
 
-SCHEMA_VERSION=1
-KNOWN_MAX=1
+SCHEMA_VERSION=2
+KNOWN_MAX=2
 # DATA_ROOT и LOCK_TTL читаются ЛЕНИВО (в момент вызова), иначе env-override после load игнорируется.
 _data_root() { echo "${REDWORK_DATA_DIR:-$HOME/Library/Application Support/redwork/runs}"; }
-_lock_ttl()  { echo "${REDWORK_LOCK_TTL_SEC:-3600}"; }
+# TTL лока согласован с порогом sweep (REDWORK_STALE_SEC=43200): раньше 3600 против эмпирических 6.9 ч
+# легитимной тишины → лок ЖИВОГО прогона отбирался через час, и «один run/repo» снова не работал.
+_lock_ttl()  { echo "${REDWORK_LOCK_TTL_SEC:-43200}"; }
 
-_slug() { printf '%s' "$1" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12; }   # shasum=macOS, sha1sum=Linux/VPS
+_slug() { printf '%s' "$1" | { shasum 2>/dev/null || sha1sum; } | cut -c1-12; }   # shasum=macOS, sha1sum=Linux/TOM1
 
 # validate_no_secrets: keyword-детектор (не энтропия — иначе ложно бьёт по путям/SHA в task). См. secret-guard.sh.
 validate_no_secrets() {
@@ -40,8 +42,22 @@ _write() {  # _write <run_dir> <jq_flag> <argname> <value> <jq_path_expr>
   [ -f "$S" ] || { echo "✗ нет state.json: $S" >&2; return 1; }
   validate_no_secrets "$val" || return 1   # гейт и для --argjson (JSON-значение может нести секрет-строку)
   # tmp РЯДОМ со state.json (та же ФС) → mv атомарен; mktemp в TMPDIR + cross-fs mv не атомарен (Yandex.Disk)
+  # ЦЕЛЕВОЙ whitelist: phase_status — конечный enum. Неизвестное значение = баг оркестратора, не данные.
+  case "$expr" in *phase_status*)
+    case "$val" in pending|done|blocked|abandoned) ;;
+      *) case "$val" in *'"phase_status"'*)
+           local _ps; _ps="$(printf '%s' "$val" | jq -r '.phase_status // empty' 2>/dev/null || true)"
+           case "${_ps:-pending}" in pending|done|blocked|abandoned) ;;
+             *) echo "✗ phase_status вне enum (pending|done|blocked|abandoned): '$_ps'" >&2; return 1 ;; esac ;;
+         *) echo "✗ phase_status вне enum (pending|done|blocked|abandoned): '$val'" >&2; return 1 ;;
+      esac ;;
+    esac ;;
+  esac
   local tmp; tmp="$(mktemp "${S}.XXXXXX")"
-  jq "$flag" "$name" "$val" "$expr" "$S" > "$tmp" || { rm -f "$tmp"; echo "✗ jq write failed" >&2; return 1; }
+  # heartbeat: КАЖДАЯ запись обновляет updated_at (сессия не может «забыть» — это не отдельный шаг).
+  local _now; _now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq "$flag" "$name" "$val" --arg _hb "$_now" "($expr) | .updated_at = \$_hb" "$S" > "$tmp" \
+    || { rm -f "$tmp"; echo "✗ jq write failed" >&2; return 1; }
   # СТРУКТУРНЫЙ пост-чек: результат обязан остаться объектом со schema_version+slug (catch-all против
   # любого выражения, давшего не-state JSON). Без него повреждённый jq-expr тихо рушил state.json.
   jq -e 'type=="object" and has("schema_version") and has("slug")' "$tmp" >/dev/null 2>&1 \
@@ -65,7 +81,7 @@ cmd_init() {
     lock:null,
     verdicts:{plan:null, finalize_pre:null, finalize_post:null},
     deploy_intent:null, live_verify_dod:[], blocked_on:null,
-    iterations:0, budget:{llm_calls:0}, created_at:$ts
+    iterations:0, budget:{llm_calls:0}, created_at:$ts, updated_at:$ts
   }' > "$S"
   echo "$rd"
 }
@@ -86,14 +102,19 @@ cmd_lock() {
     local lpid lat
     lpid="$(cat "$LK/pid" 2>/dev/null || echo 0)"; lat="$(cat "$LK/at" 2>/dev/null || echo 0)"
     local now; now="$(date +%s)"
-    if { [ "$lpid" -gt 0 ] && kill -0 "$lpid" 2>/dev/null; } && [ $(( now - lat )) -lt "$(_lock_ttl)" ]; then
-      echo "✗ run уже активен (pid $lpid, $(( now - lat ))s назад) — один redwork на repo. exit." >&2; return 1
+    # ⚠ pid НЕ является признаком жизни: cmd_lock пишет $$ процесса state.sh, который умирает сразу после.
+    # Признак жизни = СВЕЖЕСТЬ .lock/at (её обновляет step.sh на каждом тике). Раньше проверка pid-а
+    # делала любой лок мгновенно stale → инвариант «один run/repo» фактически не работал.
+    if [ $(( now - lat )) -lt "$(_lock_ttl)" ]; then
+      echo "✗ run уже активен (heartbeat $(( now - lat ))s назад) — один redwork на repo. exit." >&2; return 1
     fi
     echo "⚠ stale lock (pid $lpid) — reclaim" >&2; rm -rf "$LK"; mkdir "$LK"
   fi
   echo "$$" > "$LK/pid"; date +%s > "$LK/at"; echo "$(_lock_ttl)" > "$LK/ttl"
   echo "✓ locked ($rd, pid $$)"
 }
+# touch: обновить heartbeat лока (зовёт step.sh на каждом тике; без него живой run выглядит протухшим)
+cmd_touch() { local LK="${1:?run_dir}/.lock"; [ -d "$LK" ] || return 0; date +%s > "$LK/at"; }
 cmd_unlock() { rm -rf "${1:?run_dir}/.lock" 2>/dev/null || true; echo "✓ unlocked"; }
 
 self_test() {
@@ -102,7 +123,8 @@ self_test() {
   local rd; rd="$(cmd_init "$(_slug 'task: "fix" promo\nbug')" 'fix promo bug' '/tmp/repo' 2 'redwork/x')"
   ok $? "init"
   [ -f "$rd/state.json" ]; ok $? "state.json создан"
-  [ "$(cmd_get "$rd" '.schema_version')" = "1" ]; ok $? "schema_version=1"
+  [ "$(cmd_get "$rd" '.schema_version')" = "2" ]; ok $? "schema_version=2"
+  [ "$(cmd_get "$rd" '.updated_at')" != "null" ]; ok $? "updated_at есть при init (v2)"
   [ "$(cmd_get "$rd" '.iterations')" = "0" ]; ok $? "iterations=0 (int)"
   # jq-safe: task с кавычками/newlines прочитался валидным JSON
   cmd_get "$rd" '.task' >/dev/null; ok $? "task с кавычками — валидный JSON"
@@ -114,15 +136,29 @@ self_test() {
   [ "$(cmd_get "$rd" '.phase')" = "P5_deploy" ]; ok $? "phase=P5_deploy"
   # РЕГРЕССИЯ (баг битого state): читающий фильтр без $val → reject, state.json НЕ перетёрт
   if _write "$rd" --arg val "P6_postverify" '.phase' 2>/dev/null; then ok 1 "читающий фильтр (.phase) должен reject'иться"; else ok 0 ""; fi
-  [ "$(cmd_get "$rd" '.schema_version')" = "1" ]; ok $? "state.json остался объектом после отказа (не голая строка)"
+  [ "$(cmd_get "$rd" '.schema_version')" = "2" ]; ok $? "state.json остался объектом после отказа (не голая строка)"
   [ "$(cmd_get "$rd" '.phase')" = "P5_deploy" ]; ok $? "phase не изменился после отказа"
   # validate_no_secrets: чистая строка ok, секрет — reject
   validate_no_secrets "just a normal task description"; ok $? "чистая строка проходит"
   # секрет split-литералом чтобы не триггерить хук/push-protection
   if validate_no_secrets "key sk-""ABCDEFGHIJ1234567890abcd" 2>/dev/null; then ok 1 "секрет должен reject'иться"; else ok 0 ""; fi
+  # heartbeat: любая запись двигает updated_at
+  local u1 u2; u1="$(cmd_get "$rd" '.updated_at')"; sleep 1
+  _write "$rd" --arg val "P4_finalize_pre" '.phase = $val' >/dev/null; u2="$(cmd_get "$rd" '.updated_at')"
+  [ "$u1" != "$u2" ]; ok $? "updated_at двигается на КАЖДОЙ записи (heartbeat не забываем)"
+  # phase_status whitelist
+  _write "$rd" --arg val "blocked" '.phase_status = $val' >/dev/null; ok $? "phase_status=blocked принят"
+  if _write "$rd" --arg val "wat" '.phase_status = $val' >/dev/null 2>&1; then ok 1 "phase_status вне enum должен reject'иться"; else ok 0 ""; fi
+  [ "$(cmd_get "$rd" '.phase_status')" = "blocked" ]; ok $? "phase_status не испорчен после отказа"
   # lock/stale
   cmd_lock "$rd" >/dev/null; ok $? "lock"
-  if cmd_lock "$rd" >/dev/null 2>&1; then ok 1 "второй lock должен отказать (pid жив)"; else ok 0 ""; fi
+  if cmd_lock "$rd" >/dev/null 2>&1; then ok 1 "второй lock должен отказать (heartbeat свежий)"; else ok 0 ""; fi
+  # РЕГРЕСС: лок с мёртвым pid, но СВЕЖИМ heartbeat = живой run (step.sh его touch'ает) → не отбирать
+  echo 999999 > "$rd/.lock/pid"; date +%s > "$rd/.lock/at"
+  if cmd_lock "$rd" >/dev/null 2>&1; then ok 1 "мёртвый pid + свежий heartbeat = ЖИВОЙ run, лок не отбирать"; else ok 0 ""; fi
+  # протухший heartbeat → reclaim
+  echo 0 > "$rd/.lock/at"; cmd_lock "$rd" >/dev/null 2>&1; ok $? "протухший heartbeat → reclaim"
+  cmd_touch "$rd"; ok $? "touch обновляет heartbeat"
   cmd_unlock "$rd" >/dev/null; ok $? "unlock"
   rm -rf "$T"
   if [ "$fail" -eq 0 ]; then echo "✓ state self-test passed"; return 0; else echo "✗ state self-test FAILED"; return 1; fi
@@ -140,8 +176,9 @@ case "${1:-}" in
     if [ "$1" = "set_str" ]; then _write "${2:?}" --arg val "${4:?}" "$3"; else _write "${2:?}" --argjson val "${4:?}" "$3"; fi
     ;;
   lock) cmd_lock "${2:?}" ;;
+  touch) cmd_touch "${2:?}" ;;
   unlock) cmd_unlock "${2:?}" ;;
   validate-no-secrets) validate_no_secrets "${2:-}" ;;
   --self-test) self_test ;;
-  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|unlock|validate-no-secrets|--self-test" >&2; exit 1 ;;
+  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|touch|unlock|validate-no-secrets|--self-test" >&2; exit 1 ;;
 esac

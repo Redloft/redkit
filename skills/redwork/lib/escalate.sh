@@ -38,6 +38,11 @@ escalate() {
     || { echo "✗ escalate: не удалось записать blocked_on — run НЕ заблокирован (опасно)" >&2; return 1; }
   [ "$(jq -r '.blocked_on.reason_code // "null"' "$rd/state.json" 2>/dev/null)" = "$reason" ] \
     || { echo "✗ escalate: read-back blocked_on провален" >&2; return 1; }
+  # phase_status=blocked ЗДЕСЬ, а не только в step.sh end --escalate: эскалация бывает и прямой
+  # (хендлер фазы, sweep). Иначе run с blocked_on остаётся в статусе pending и врёт в статистике —
+  # ровно тот класс рассинхрона, что лечим (наблюдалось на 17e485502440). Best-effort: не валить эскалацию.
+  bash "$STATE" set_str "$rd" '.phase_status = $val' blocked >/dev/null 2>&1 || \
+    echo "⚠ escalate: phase_status не выставлен (blocked_on записан)" >&2
 
   # 3) TG @rltimebot — best-effort (bash-канал). dry-run в тестах.
   local tg="skipped"
@@ -53,7 +58,7 @@ escalate() {
 
   # 4) emit-директива для СЕССИИ: дофаерить push + Трекер (bash не имеет этих инструментов)
   echo "$payload"
-  echo "‹ESCALATE-DIRECTIVE› channels: TG=$tg ; session→ PushNotification + (если PROJ-id) tracker issue_add_comment с reason_code+needs+run_path (без command-output)" >&2
+  echo "‹ESCALATE-DIRECTIVE› channels: TG=$tg ; session→ PushNotification + (если CPMO-id) tracker issue_add_comment с reason_code+needs+run_path (без command-output)" >&2
   return 0
 }
 
@@ -61,7 +66,7 @@ self_test() {
   set +e; export REDWORK_ESCALATE_DRYRUN=1; local T; T="$(mktemp -d)"; local rd="$T/run"; mkdir -p "$rd"; local fail=0
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   # фикстура как реальный state.json (schema_version обязателен — state.sh _write требует валидный state-объект)
-  jq -n '{schema_version:1,slug:"s",phase:"P5_deploy",blocked_on:null}' > "$rd/state.json"
+  jq -n '{schema_version:2,slug:"s",phase:"P5_deploy",phase_status:"pending",blocked_on:null}' > "$rd/state.json"
   local out; out="$(escalate "$rd" DEPLOY_HIGH_RISK "approve_deploy,review_diff" "high_risk_migration" 2>/dev/null)"
   ok $? "escalate valid"
   printf '%s' "$out" | jq -e '.reason_code=="DEPLOY_HIGH_RISK"' >/dev/null; ok $? "reason_code в payload"
@@ -69,6 +74,7 @@ self_test() {
   printf '%s' "$out" | jq -e 'has("task")|not' >/dev/null; ok $? "НЕТ task/PII в payload"
   [ "$(jq -r '.blocked_on.reason_code' "$rd/state.json")" = "DEPLOY_HIGH_RISK" ]; ok $? "blocked_on выставлен в state"
   [ -f "$rd/escalations.log" ]; ok $? "durable локальный лог (пол доставки)"
+  [ "$(jq -r '.phase_status // "-"' "$rd/state.json")" = "blocked" ]; ok $? "phase_status=blocked и при ПРЯМОЙ эскалации"
   # WAIT_HUMAN (dev-чекпоинт режимов 1/2) ОБЯЗАН быть в enum (был critical-баг — SKILL зовёт его)
   escalate "$rd" WAIT_HUMAN "review_dev" >/dev/null 2>&1; ok $? "WAIT_HUMAN в enum (dev-чекпоинт)"
   # невалидный reason_code → reject

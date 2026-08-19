@@ -17,8 +17,13 @@ run "crash-canary"    bash "$HERE/crash-canary-test.sh"
 run "persist-plan"    bash "$HERE/persist-plan.sh" --self-test
 run "panel.js syntax" node --check "$HERE/../workflow/panel.js"
 run "reviewer-loop syntax" node --check "$HERE/../workflow/reviewer-loop.js"
+run "cross-model regress"  bash "$HERE/test-cross-model.sh"
 run "ceiling-guard"   node "$HERE/ceiling-test.js"
 run "ledger"          bash "$HERE/ledger.sh" --self-test
+run "nudge (Stop-hook)" bash "$HERE/test-nudge.sh"
+run "role registry"   node "$HERE/registry-test.js"
+run "artifact entry" node "$HERE/artifact-test.js"
+run "seam-clause (сквозной пункт)" bash "$HERE/test-seam-clause.sh"
 run "golden fixtures" bash "$HERE/run-golden.sh"
 
 echo

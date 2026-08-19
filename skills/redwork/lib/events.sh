@@ -27,13 +27,14 @@ _acquire_lock() {
   return 1
 }
 
-VALID_TYPES="phase_start phase_done gate_result smoke_result deploy rollback escalation"
+VALID_TYPES="phase_start phase_done gate_result smoke_result deploy rollback escalation step_crash"
 # обязательные поля per event_type (machine-contract union)
 _required() { case "$1" in
   smoke_result) echo "observed_status_code match expected_status_code" ;;
   deploy|rollback) echo "intent_id exit_code" ;;
   gate_result) echo "gate exit_code" ;;
   escalation) echo "reason_code" ;;
+  step_crash) echo "exit_code" ;;
   *) echo "" ;;
 esac }
 

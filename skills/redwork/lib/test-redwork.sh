@@ -6,6 +6,8 @@ declare -i FAIL=0
 run() { printf '\n▶ %s\n' "$1"; shift; if "$@"; then :; else echo "  ↳ FAILED"; FAIL+=1; fi; }
 
 run "state"         bash "$HERE/state.sh" --self-test
+run "step"          bash "$HERE/step.sh" --self-test
+run "migrate"       bash "$HERE/migrate.sh" --self-test
 run "events"        bash "$HERE/events.sh" --self-test
 run "risk-classify" bash "$HERE/risk-classify.sh" --self-test
 run "escalate"      bash "$HERE/escalate.sh" --self-test

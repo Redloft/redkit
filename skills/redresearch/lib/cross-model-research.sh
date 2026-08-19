@@ -38,13 +38,21 @@ CURL_OPTS=(
 # Per-leg curl timeouts (сек). GPT-5 медленнее на больших промптах; Gemini — через SOCKS5 proxy.
 GPT_MAX_TIME="${GPT_MAX_TIME:-300}"
 GEM_MAX_TIME="${GEM_MAX_TIME:-180}"
+
+# Kimi K3 инварианты (effort/пол-токенов/temperature-omit/retry) — единая точка истины.
+# Guard (finalize rank 3): отсутствие lib деградирует ТОЛЬКО Kimi-ногу, не роняет gpt+gemini.
+[ -f "$HOME/.claude/skills/_shared/moonshot/kimi-lib.sh" ] && \
+  source "$HOME/.claude/skills/_shared/moonshot/kimi-lib.sh" || true
 KIMI_MAX_TIME="${KIMI_MAX_TIME:-480}"   # K3 always-on thinking на больших research-промптах МЕДЛЕННЫЙ (240с не хватало, эмпирика 2026-07-20); gated ногой (RESEARCH_KIMI=1)
 
 # Kimi K3 (Moonshot) — ОПЦИОНАЛЬНАЯ 3-я нога за тумблером RESEARCH_KIMI=1 (default off).
 # Кандидат в независимые голоса research-ревью (2026-07-20). Прод-пара остаётся gpt+gemini,
 # пока мини-A/B не докажет уникальные находки (урок домен-зависимости: GLM тут отклонён 07-03).
 # Гео РФ = прямой доступ (в отличие от Gemini), прокси НЕ нужен.
-RESEARCH_KIMI="${RESEARCH_KIMI:-0}"
+# ВКЛЮЧЁН по умолчанию 2026-07-20 после пере-A/B с reasoning_effort=high: Kimi даёт УНИКАЛЬНОЕ
+# (галлюцинированные источники, самопротиворечия отчёта, лицензионные риски, пробелы рынка), чего
+# пара gpt+gemini не находит — прежний overlap-вердикт был на кривом дефолте max. RESEARCH_KIMI=0 чтобы выкл.
+RESEARCH_KIMI="${RESEARCH_KIMI:-1}"
 
 # ─── Gemini geo-block workaround ───
 # Gemini geo-блокирует RU IP (оба auth-пути — и ?key=, и x-goog-api-key header — дают live 400
@@ -59,6 +67,7 @@ RESEARCH_KIMI="${RESEARCH_KIMI:-0}"
 # helper-missing: уважаем явный GEMINI_PROXY, иначе прямой (1080-фолбэк живёт внутри функции,
 # т.е. доступен только при наличии helper'а — осознанное сужение сломанной-установки edge).
 _GFI=~/.claude/skills/_shared/gemini-fi/fi-proxy.sh
+# shellcheck source=/dev/null  # путь вычисляется в рантайме (~/.claude/...); файл проверяется [ -f ] строкой ниже
 if [ -f "$_GFI" ] && source "$_GFI"; then
   gemini_fi_autodetect_proxy "cross-model-research"
 else
@@ -168,7 +177,7 @@ call_gemini() {
   local payload
   payload=$(jq -nc --arg p "$PROMPT" '{
     contents: [{parts: [{text:$p}]}],
-    generationConfig: {temperature: 0.3, responseMimeType: "application/json"}
+    generationConfig: {temperature: 1.0, responseMimeType: "application/json"}
   }')
   local proxy_arg=()
   if [ -n "${GEMINI_PROXY:-}" ]; then
@@ -186,24 +195,43 @@ call_gemini() {
 }
 
 call_kimi() {
-  # Moonshot Chat Completions (OpenAI-совместимый). max_tokens с headroom —
-  # K3 always-on thinking жжёт бюджет до ответа (reasoning_tokens), малый лимит → пустой content.
-  # max_tokens 16000: K3 в JSON-режиме жжёт ~8000 токенов на reasoning ДО ответа (эмпирика A/B
-  # 2026-07-20) — при 8000 finish=length и ПУСТОЙ content на любом размере отчёта. 16000 даёт
-  # thinking (~7-8k) + сам ответ (~2-3k) уложиться. Латентность всё равно ~5-7 мин на вызов.
-  local payload
-  payload=$(jq -nc --arg p "$PROMPT" '{
-    model: "kimi-k3",
-    messages: [{role:"user", content:$p}],
-    max_tokens: 16000,
-    response_format: {type:"json_object"}
-  }')
-  local http
-  http=$(curl "${CURL_OPTS[@]}" --max-time "$KIMI_MAX_TIME" -o "$KIMI_OUT" -w "%{http_code}" \
-    -H "Authorization: Bearer $MOONSHOT_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "$payload" \
-    https://api.moonshot.ai/v1/chat/completions || true)
+  # Moonshot K3 — все инварианты (effort, пол 16000, temperature-omit, retry) в общей
+  # kimi-lib.sh (source выше). task=research → effort=high дефолт, clamp пола внутри
+  # kimi_build_payload. Латентность ~5-7 мин на вызов при high.
+  # Фикс 2026-07-22 (panel): добавлен length-retry ×2 — раньше finish=length уходил
+  # дальше как пустой content без второй попытки.
+  # lib отсутствует (guard выше) → деградация только этой ноги: http=000 → errors[] даунстримом
+  if [ -z "${KIMI_LIB_LOADED:-}" ]; then
+    echo "call_kimi: kimi-lib.sh недоступна — нога деградирована" >&2
+    printf '000\n' > "$KIMI_META"; return 0
+  fi
+  local payload http chk maxt=16000 attempt=1
+  payload=$(kimi_build_payload research '' "$PROMPT" "$maxt" "${RESEARCH_KIMI_EFFORT:-}" 1)
+  # payload + auth через chmod-600 файлы, НЕ argv (lib инвариант 5; finalize rank 2 — раньше
+  # ключ был в argv через -H, виден локальному ps; урок lftp-dryrun-credential-leak)
+  local payf authf; payf="$(mktemp)"; authf="$(mktemp)"; chmod 600 "$payf" "$authf"
+  # trap в subshell (call_kimi запускается как `call_kimi &`): authf с Bearer-ключом НЕ должен
+  # пережить аварийную смерть ноги (внешний судья glm 2026-07-22)
+  trap 'rm -f "$payf" "$authf"' EXIT
+  printf '%s' "$payload" > "$payf"
+  kimi_auth_conf "$MOONSHOT_API_KEY" > "$authf"
+  while :; do
+    http=$(curl "${CURL_OPTS[@]}" --max-time "$KIMI_MAX_TIME" -o "$KIMI_OUT" -w "%{http_code}" \
+      --config "$authf" \
+      -H "Content-Type: application/json" \
+      --data-binary "@$payf" \
+      "$KIMI_ENDPOINT" || true)
+    # `chk=0; … || chk=$?` — ОБЯЗАТЕЛЬНО: файл под set -e, голый статусный вызов с не-OK
+    # кодом убил бы subshell до retry и до записи KIMI_META (finalize rank 1, CONFIRMED)
+    chk=0; kimi_check_response "$KIMI_OUT" "$http" || chk=$?
+    if [ "$chk" -eq "$KIMI_RETRY_LENGTH" ] && [ "$attempt" -le "$KIMI_MAX_RETRIES" ]; then
+      maxt="$(kimi_retry_max "$maxt")"; attempt=$((attempt+1))
+      kimi_build_payload research '' "$PROMPT" "$maxt" "${RESEARCH_KIMI_EFFORT:-}" 1 > "$payf"
+      continue
+    fi
+    break   # OK/EMPTY/HTTP_FAIL/TRANSPORT — даунстрим-parse кладёт не-OK в errors[] (leg degraded)
+  done
+  rm -f "$payf" "$authf"
   printf '%s\n' "$http" > "$KIMI_META"
 }
 

@@ -20,12 +20,17 @@ export const meta = {
   ],
 }
 
+// FABLE: остаётся ТОЛЬКО на --ultra (редкие критичные прогоны). Дефолтный путь
+// (standard/heavy/lite) — Opus 5: панель гоняется постоянно, там важнее цена.
+// Константа в этом виде — якорь для Fable-guard в model-watch/scripts/health.sh.
+const FABLE = 'fable'
+
 const ROLE_DEFINITIONS = {
   scoper:    { file: '~/.claude/skills/plan-panel/roles/scoper.md',    model: 'haiku' },
   architect: { file: '~/.claude/skills/plan-panel/roles/architect.md', model: 'sonnet' },
   qa:        { file: '~/.claude/skills/plan-panel/roles/qa.md',        model: 'sonnet' },
   security:  { file: '~/.claude/skills/plan-panel/roles/security.md',  model: 'sonnet' },
-  judge:     { file: '~/.claude/skills/plan-panel/roles/judge.md',     model: 'opus' },
+  judge:     { file: '~/.claude/skills/plan-panel/roles/judge.md',     model: 'opus' },  // ultra → fable, см. JUDGE_MODEL
   // Phase B: frontend, backend, data, ops
 }
 
@@ -62,7 +67,7 @@ const FINDINGS_SCHEMA = {
 
 const SCOPE_SCHEMA = {
   type: 'object',
-  required: ['scope_tags', 'selected_roles', 'complexity', 'rationale', 'recommended_mode', 'needs_user_confirmation'],
+  required: ['scope_tags', 'selected_roles', 'complexity', 'rationale'], // recommended_mode/needs_user_confirmation optional: Haiku флейково теряет поля → дефолт в коде (2026-07-22)
   additionalProperties: true,
   properties: {
     scope_tags: { type: 'array', items: { type: 'string' } },
@@ -104,6 +109,11 @@ const JUDGE_SCHEMA = {
     },
     summary: { type: 'string' },
     final_verdict_reasoning: { type: 'string' },
+    // Ф4: вторая ось. НЕ замена verdict — на verdict висят ceiling-guard и гейт деплоя
+    // redwork, его enum неприкосновенен. Здесь — классификация ОСТАТКА, которую судья
+    // и так делает прозой (roles/judge.md §Ceiling), поднятая в машиночитаемый вид.
+    remainder_class: { enum: ['architectural', 'implementation', 'empirical', 'none'] },
+    verdict_label: { type: 'string' },
   },
 }
 
@@ -121,9 +131,41 @@ const cwd = parsedArgs?.cwd || ''
 const timestamp = parsedArgs?.timestamp || 'now'
 const projectDir = parsedArgs?.project_dir || ''
 const centralDir = parsedArgs?.central_dir || ''
+// RedBrain-контекст от архивариуса: оркестратор зовёт archivist.sh (recall.py) ДО Workflow()
+// и кладёт бриф сюда. Пусто → панель работает как раньше (fail-open).
+const memoryBrief = parsedArgs?.memory_brief || ''
+// fact-grounder: свежие внешние веб-факты по проверяемым утверждениям плана (ground.py, caller-level ДО Workflow).
+// Симметрично memoryBrief, но наружу в веб. Пусто → панель как раньше (fail-open).
+const researchBrief = parsedArgs?.research_brief || ''
+// Канон линз (Ф1): caller читает lenses/canon.json и передаёт содержимое ИНЛАЙН — песочница
+// Workflow без ФС, сам файл прочитать нельзя (тот же паттерн, что plan_text/memory_brief).
+// Пусто → критик выдаёт свободный слаг, как до Ф1 (fail-open, кластеризация тоже деградирует мягко).
+const canonLexicon = parsedArgs?.canon_lexicon || ''
+// Реестр ролей как данные (Ф5). Читает CALLER (песочница без ФС) и передаёт содержимое
+// roles/registry.json инлайн. Не передан → работаем на прежнем хардкоде: это постадийная
+// раскатка, caller'ы обновляются по одному, паритет держит тест registry-parity.
+let roleRegistry = null
+try {
+  const raw = parsedArgs?.roles_registry
+  const parsed = typeof raw === 'string' ? (raw.trim() ? JSON.parse(raw) : null) : raw
+  if (parsed && Array.isArray(parsed.roles) && parsed.roles.length) roleRegistry = parsed
+} catch (e) { log(`⚠ roles_registry не распарсился (${e.message}) — работаю на хардкоде`) }
+const registryRole = (name) => roleRegistry ? (roleRegistry.roles.find(r => r.name === name) || null) : null
 // run_id: передаётся caller'ом для correlation. Если не передан — пометим как 'unknown'
 // (Date.now/random запрещены в workflow scripts; caller должен сгенерировать через persist.sh или uuid)
 const runId = parsedArgs?.run_id || 'unknown-run-id'
+// telemetry_ok: сработал ли дефолт хоть по одному полю. Детектор по ВХОДУ, а не по значению
+// на выходе: reviewer-loop передаёт вниз `${runId}-i${iter}`, что при дефолте даёт непустой
+// 'unknown-run-id-i1' — sentinel-проверка приняла бы его за валидный и вечно рапортовала бы OK.
+// external_telemetry_ok — флаг вышестоящего звена (reviewer-loop считает свой ДО дефолта).
+const hasRunId = typeof parsedArgs?.run_id === 'string' && parsedArgs.run_id.trim() !== ''
+const hasTimestamp = typeof parsedArgs?.timestamp === 'string' && parsedArgs.timestamp.trim() !== ''
+const upstreamTelemetryOk = parsedArgs?.external_telemetry_ok !== false
+const telemetryOk = hasRunId && hasTimestamp && upstreamTelemetryOk
+// entry_point: какой caller запустил (skill-freeform | slash-command | from-task). Нужен, чтобы
+// ledger.sh stat показал, КАКОЙ вход течёт, а не только сколько записей сломано суммарно.
+const entryPoint = parsedArgs?.entry_point || 'unknown'
+if (!telemetryOk) log(`⚠ телеметрия неполна (run_id:${hasRunId} ts:${hasTimestamp} upstream:${upstreamTelemetryOk}) — запись пойдёт в ledger с telemetry_ok:false`)
 
 log(`Mode: ${mode} · project: ${projectSlug} · plan length: ${planText.length} chars`)
 if (planText === 'NO_PLAN_PROVIDED') {
@@ -193,7 +235,8 @@ if (scoperConfidence < 0.3 || scoperRoleCount < 3) {
 }
 
 // Roles implemented (Phase A + B1)
-const ALLOWED = ['scoper', 'architect', 'qa', 'security', 'frontend', 'backend', 'data', 'ops', 'judge']
+const ALLOWED_FALLBACK = ['scoper', 'architect', 'qa', 'security', 'frontend', 'backend', 'data', 'ops', 'judge']
+const ALLOWED = roleRegistry ? roleRegistry.roles.map(r => r.name) : ALLOWED_FALLBACK
 const skipped = (scoper.selected_roles || []).filter(r => !ALLOWED.includes(r))
 if (skipped.length) {
   log(`⚠️  Phase A roles not yet implemented, skipping: ${skipped.join(', ')} (judge должен это отметить как gap)`)
@@ -201,6 +244,10 @@ if (skipped.length) {
 const selectedRoles = (scoper.selected_roles || [])
   .filter(r => ALLOWED.includes(r))
   .filter(r => r !== 'scoper' && r !== 'judge') // эти отдельно — не входят в parallel review phase
+
+// Дефолты для optional-полей scoper'а (Haiku иногда теряет их в StructuredOutput)
+if (!scoper.recommended_mode) scoper.recommended_mode = scoper.complexity === 'high' ? 'standard' : (scoper.complexity === 'low' ? 'lite' : 'standard')
+if (typeof scoper.needs_user_confirmation !== 'boolean') scoper.needs_user_confirmation = false
 
 log(`Scope: ${scoper.scope_tags.join(', ')} · complexity: ${scoper.complexity}`)
 log(`Selected roles for review: ${selectedRoles.join(', ')}`)
@@ -238,12 +285,31 @@ if (effectiveMode === 'lite') {
 // ============= Phase 2: PARALLEL REVIEW =============
 phase('Review')
 
+// СКВОЗНОЙ ПУНКТ (solidify 2026-08-19, тема judge/judge-covers-for-roles ×11 critical + security ×4).
+// Судья систематически ловил СВЯЗКИ, которых нет ни в одном чек-листе: каждая роль честно
+// проверяла свой слой и останавливалась на его границе. Живые примеры класса: правка общего
+// входного файла ломала уже разосланные наружу и закэшированные копии; ни одна роль не спросила,
+// что происходит ПОСЛЕ успешной записи в БД (доставка, уведомление); полнота доказательства
+// проверялась побайтово, а не по смыслу. Это не дефект отдельной роли — это ничья земля между
+// ролями, поэтому пункт живёт в ОБЩЕМ промпте, а не в семи чек-листах.
+const SEAM_CLAUSE =
+  'СКВОЗНАЯ ПРОВЕРКА (обязательна, помимо твоего чек-листа). Твоя зона ответственности кончается ' +
+  'раньше, чем последствия изменения. Ответь по каждому значимому изменению: (1) что происходит ПОСЛЕ ' +
+  'того, как описанный успех наступил — доставка, уведомление, следующий шаг, кто и как узнаёт, что ' +
+  'дальше с этим делают; (2) что СНАРУЖИ твоего слоя уже зависит от того, что меняется — уже разосланные ' +
+  'или закэшированные наружу копии, соседние продукты на общем коде, фоновые задания, потребители старых ' +
+  'версий, которых не обновить. Если на вопрос отвечает не твоя роль и не видно, чья — это finding, ' +
+  'а не повод промолчать: ровно такие связки судья регулярно добирает вместо ролей.'
+
 // Helper: общий wrapper для prompt — экономит дублирование
 function buildRolePrompt(role, plan, scoperOut, extraInstructions = '') {
   return (
     `Ты — ${role} из skill plan-panel. Прочитай role spec ~/.claude/skills/plan-panel/roles/${role}.md и применяй его checklist пунктуально.\n\n` +
     `=== ПЛАН ===\n${plan}\n=== END ===\n\n` +
+    (memoryBrief ? `=== RedBrain-контекст (память Игоря — сверь план с принятыми решениями/граблями, не переоткрывай известное) ===\n${memoryBrief}\n=== END ===\n\n` : '') +
+    (researchBrief ? `${researchBrief}\n=== END ===\n\n` : '') +
     `=== SCOPE (от scoper) ===\n${JSON.stringify(scoperOut, null, 2)}\n=== END ===\n\n` +
+    `${SEAM_CLAUSE}\n\n` +
     `Верни СТРОГО JSON по output schema из _shared.md. Минимум 1 actionable suggestion на finding (иначе verdict не может быть FAIL/NEEDS-WORK).\n` +
     (extraInstructions ? `\n${extraInstructions}\n` : '')
   )
@@ -251,7 +317,7 @@ function buildRolePrompt(role, plan, scoperOut, extraInstructions = '') {
 
 const reviewPrompts = {
   architect: (plan) => buildRolePrompt('architect', plan, scoper,
-    'Фокус: структура плана, не код. 12 пунктов: декомпозиция, dependencies, missing layers, premature abstraction, reversibility, achievability, contracts, state management. НЕ дублируй security/qa findings.'),
+    'Фокус: структура плана, не код. Пункты (точный список — в roles/architect.md, число не фиксируй): декомпозиция, dependencies, missing layers, premature abstraction, reversibility, achievability, contracts, state management. НЕ дублируй security/qa findings.'),
 
   qa: (plan) => buildRolePrompt('qa', plan, scoper,
     'Фокус: acceptance criteria + edge cases + test strategy. НЕ дублируй security findings (sql injection = security; empty input validation = qa).'),
@@ -260,7 +326,7 @@ const reviewPrompts = {
     'КРИТИЧНО: если в плане упомянуты credentials/tokens/passwords/keys — проверь соответствие secrets-protocol (op://vault или env, никогда .env плейн-текст). Любое нарушение = critical. Threat model summary обязательно.'),
 
   frontend: (plan) => buildRolePrompt('frontend', plan, scoper,
-    'Фокус: UX контракт через призму пользователя. 12 пунктов: states (loading/error/empty), accessibility, perf budgets, responsive, animation, forms, i18n. НЕ предлагай конкретный CSS/JSX — это implementation.'),
+    'Фокус: UX контракт через призму пользователя. Пункты (точный список — в roles/frontend.md, число не фиксируй): states (loading/error/empty), accessibility, perf budgets, responsive, animation, forms, i18n. НЕ предлагай конкретный CSS/JSX — это implementation.'),
 
   backend: (plan) => buildRolePrompt('backend', plan, scoper,
     'Фокус: API design + observability + idempotency. НЕ дублируй security (auth = security; contract = backend) и data (schema = data; transactional boundaries = backend).'),
@@ -274,15 +340,21 @@ const reviewPrompts = {
 
 const reviews = await parallel(
   reviewRoles.map((role) => async () => {
-    const prompt = reviewPrompts[role]
-    if (!prompt) {
-      log(`⚠️ No prompt for role ${role}, skipping`)
-      return null
+    // Источник промпта: реестр (focus) → хардкод-словарь (пока caller не обновлён).
+    const reg = registryRole(role)
+    const promptText = (reg && typeof reg.focus === 'string')
+      ? buildRolePrompt(role, planText, scoper, reg.focus)
+      : (reviewPrompts[role] ? reviewPrompts[role](planText) : null)
+    // FAIL-LOUD (Ф5). Раньше здесь был `log(...); return null` — роль молча выпадала из
+    // прогона, вердикт выносился по неполному составу, и заметить это было нечем.
+    if (!promptText) {
+      const known = Object.keys(reviewPrompts).join(', ')
+      throw new Error(`роль '${role}' выбрана scoper'ом и прошла ALLOWED, но промпта нет: ни в roles_registry, ни в reviewPrompts (известные: ${known}). Добавь запись в roles/registry.json или убери роль из ALLOWED — молча пропускать нельзя.`)
     }
-    return await agent(prompt(planText), {
+    return await agent(promptText, {
       label: `review:${role}`,
       phase: 'Review',
-      model: 'sonnet',
+      model: (reg && reg.model) || 'sonnet',
       schema: FINDINGS_SCHEMA,
     })
   })
@@ -312,11 +384,15 @@ const judge = await agent(
   (skipped.length ? `Roles SKIPPED (not implemented in Phase A): ${skipped.join(', ')} — ОБЯЗАТЕЛЬНО упомяни их как gaps в твоём output.\n` : '') +
   `=== END EXECUTION REPORT ===\n\n` +
   `=== ПЛАН ===\n${planText}\n=== END ===\n\n` +
+  (memoryBrief ? `=== RedBrain-контекст (память Игоря) ===\n${memoryBrief}\n=== END ===\n\n` : '') +
+  (researchBrief ? `${researchBrief}\n=== END ===\n\n` : '') +
   `=== SCOPE (scoper output) ===\n${JSON.stringify(scoper, null, 2)}\n=== END ===\n\n` +
   `=== ROLE REVIEWS (${validReviews.length} ролей) ===\n${JSON.stringify(validReviews, null, 2)}\n=== END ===\n\n` +
   `Твои 3 задачи:\n` +
   `1. Conflicts — найди противоречия между ролями. ${heavy ? 'Имеешь право в conflicts указывать "cross_examined" если хочешь чтобы роль переоценила. Но в Phase A мы не делаем второй round — просто отметь конфликт и предложи resolution.' : 'Просто отметь конфликты, не делай cross-exam.'}\n` +
   `2. Gaps — что НИ ОДНА роль не покрыла? Особо смотри если security НЕ был активирован, но в плане есть user input / public endpoint / credentials.\n` +
+  (memoryBrief ? `2b. Memory-conflict — по RedBrain-контексту выше: противоречит ли план установленным фактам/решениям/граблям из памяти Игоря? Игнорирует ли известное ограничение или переоткрывает решённое? Такие findings — critical/warning со ссылкой на source_doc.\n` : '') +
+  (researchBrief ? `2c. Freshness-conflict — по блоку «Свежие внешние факты» выше: противоречит ли план АКТУАЛЬНОМУ состоянию из веба (устаревшая версия/EOL-релиз/депрекейт/CVE)? Если план опирается на устаревший факт — critical/warning с указанием свежего факта + URL.\n` : '') +
   `3. Priority — собери все findings от всех ролей, рангируй по severity × impact, выдай top-5-10 actionable items.\n\n` +
   `Verdict matrix:\n` +
   `- PASS: нет critical, ≤2 warnings\n` +
@@ -324,7 +400,7 @@ const judge = await agent(
   `- FAIL: ≥2 critical от разных ролей + неразрешимые конфликты\n` +
   `- UNCERTAIN: confidence <0.5\n\n` +
   `Верни JSON по judge schema.`,
-  { label: 'judge', phase: 'Synthesize', model: 'opus', schema: JUDGE_SCHEMA }
+  { label: 'judge', phase: 'Synthesize', model: effectiveMode === 'ultra' ? FABLE : 'opus', schema: JUDGE_SCHEMA }
 )
 
 if (!judge) {
@@ -377,7 +453,9 @@ if (effectiveMode === 'ultra') {
     `   - reviews.json (JSON массив всех role reviews)\n` +
     `2. Запусти через Bash:\n` +
     `   bash ~/.claude/skills/plan-panel/lib/cross-model.sh <plan> <judge> <reviews>\n` +
-    `   (скрипт self-wrap'ит через op run если env не выставлен)\n` +
+    `   (скрипт self-wrap'ит через op run если env не выставлен; GEMINI_PROXY для обхода\n` +
+    `    geo-block Gemini автоопределяется из локального SOCKS5 на 127.0.0.1:1080; таймауты\n` +
+    `    curl уже с запасом — GPT 300с / Gemini 180с. Ручной proxy/retry НЕ нужен.)\n` +
     `3. Получи JSON output с {gpt, gemini, errors, usage}\n` +
     `4. Верни структурированный финальный анализ.\n\n` +
     `Plan text:\n${planText}\n\n` +
@@ -409,6 +487,7 @@ const CRITIC_SCHEMA = {
       properties: {
         role: { type: 'string', minLength: 1 },
         lens_key: { type: 'string', minLength: 1 },
+        lens_rationale: { type: 'string' },  // обязателен ТОЛЬКО при lens_key: "new:*" (см. промпт)
         severity: { enum: ['critical', 'warning', 'suggestion'] },
         observation: { type: 'string', minLength: 1 },
         proposed_checklist_delta: { type: 'string', minLength: 1 },
@@ -416,10 +495,17 @@ const CRITIC_SCHEMA = {
     } },
   },
 }
+// Инструкция по lens_key: с каноном — закрытый выбор, без канона — свободный слаг (до-Ф1).
+const lensInstruction = canonLexicon
+  ? `=== КАНОН ЛИНЗ — выбирай lens_key ТОЛЬКО отсюда ===\n${canonLexicon}\n=== END КАНОН ===\n` +
+    `lens_key ОБЯЗАН быть одним из key выше (точное совпадение, без вариаций). Если ни одна линза реально не подходит — верни lens_key: "new:<kebab-слаг>" И обязательное поле lens_rationale (почему ни одна существующая не годится, одной фразой).\n` +
+    `Свободные ключи без префикса new: попадут в карантин и будут потеряны для петли — не выдумывай новых имён для того, что уже есть в каноне. Похоже, но не точно → бери существующий key.\n`
+  : `lens_key — короткий стабильный kebab-слаг линзы (напр. 'type-impedance-on-write').\n`
 const critic = await agent(
   `Ты — methodology-critic из plan-panel. НЕ ищи новых проблем в плане. Единственная задача: по уже собранным findings ролей и выводу судьи понять, не вскрыл ли какой-то finding ДЫРУ В ЧЕК-ЛИСТЕ САМОЙ РОЛИ — standing-проверку, которой у роли НЕТ, но должна быть, — а не просто дефект этого конкретного плана.\n` +
   `Критерий разделения: «будь у роли такой пункт чек-листа, она ловила бы этот КЛАСС проблемы в ЛЮБОМ плане» → methodology_finding. «Разовая проблема именно здесь» → игнор.\n` +
-  `Для каждого верни: { role, lens_key (короткий стабильный kebab-слаг линзы, напр. 'type-impedance-on-write'), severity, observation (что роль системно упускает), proposed_checklist_delta (один новый пункт чек-листа, одной фразой) }.\n` +
+  `Для каждого верни: { role, lens_key, severity, observation (что роль системно упускает), proposed_checklist_delta (один новый пункт чек-листа, одной фразой) }.\n` +
+  lensInstruction +
   `Если методологических пробелов нет (все findings — про этот план) → methodology_findings: []. НЕ выдумывай ради заполнения.\n\n` +
   `=== JUDGE ===\n${JSON.stringify({ verdict: judge.verdict, gaps: judge.gaps || [], conflicts: judge.conflicts || [], reasoning: judge.final_verdict_reasoning }, null, 2)}\n\n` +
   `=== ROLE FINDINGS ===\n${JSON.stringify(validReviews.map(r => ({ role: r.role, findings: r.findings })), null, 2)}\n=== END ===\n\nВерни JSON по схеме.`,
@@ -431,8 +517,12 @@ const empiricalCount = validReviews.reduce((n, r) => n + (r.findings || []).filt
 // learnings_entry — caller (SKILL) пишет в ledger через lib/ledger.sh append (workflow не имеет fs)
 const learningsEntry = {
   ts: timestamp, skill: 'plan-panel', run_id: runId, mode,
+  telemetry_ok: telemetryOk, entry_point: entryPoint,
   verdict: metaJudge?.final_verdict || judge.verdict,
   confidence: metaJudge?.confidence || judge.confidence,
+  // Ф4: копим ось остатка — по ней и меряется «панель стала лучше» (рост доли
+  // implementation означает, что архитектурные дыры перестали доживать до вердикта).
+  remainder_class: judge.remainder_class || null,
   gaps: (judge.gaps || []).map(g => typeof g === 'string' ? g : (g.area || '')).filter(Boolean),
   conflicts_count: (judge.conflicts || []).length,
   empirical_count: empiricalCount,
@@ -457,7 +547,7 @@ function renderJudgeMd() {
   lines.push(`## Summary\n\n${j.summary || ''}\n`)
   lines.push(`## Final reasoning\n\n${j.final_verdict_reasoning || ''}\n`)
   if (j.conflicts?.length) {
-    lines.push(`## Conflicts\n\n${j.conflicts.map(c => `- Between ${(c.between||[]).join(' ↔ ')}: ${c.topic || c.summary}\n  - Resolution: ${c.resolution || '(unresolved)'}`).join('\n')}\n`)
+    lines.push(`## Conflicts\n\n${j.conflicts.map(c => { const b = Array.isArray(c.between) ? c.between.join(' ↔ ') : (c.between || ''); return `- Between ${b}: ${c.topic || c.summary || c.issue || ''}\n  - Resolution: ${c.resolution || '(unresolved)'}` }).join('\n')}\n`)
   }
   if (j.gaps?.length) {
     lines.push(`## Gaps\n\n${j.gaps.map(g => typeof g === 'string' ? `- ${g}` : `- **${g.area || ''}**: ${g.issue || ''}`).join('\n')}\n`)
