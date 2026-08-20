@@ -112,7 +112,14 @@ Persistence:
 1. Понять что план — это либо текущее сообщение пользователя, либо последний значимый план в session (если он сказал «проверь то что мы только что обсудили»)
 2. Сохранить план в `<persistence_dir>/plan.md` (по схеме ниже)
 2b. **Архивариус (RedBrain-заземление, рекомендуется):** `bash ~/.claude/skills/redbrain/lib/archivist.sh <persistence_dir>/plan.md` → stdout захватить как `memory_brief`. Зовётся ЗДЕСЬ, оркестратором, ДО Workflow (recall.py нужен диск/SQLite, а песочница panel.js без ФС; subprocess, НЕ import — сохранить signal-инвариант). scope work fail-closed, fail-open (пусто → не передавать). Пропустить при `--no-memory`.
-2c. **Fact-grounder (свежие веб-факты, рекомендуется, non-blocking):** `printf '%s' "<plan_text>" | python3 ~/.claude/skills/_shared/fact-grounder/ground.py` → stdout захватить как `research_brief` (пусто = ок, tier=none). Оркестратор зовёт ДО Workflow (движки — shell, песочница panel.js без FS). Дёшево (tier none→0 вызовов; light/critical→до 5 Tavily ~$0.04, scrub+бюджет-гард внутри адаптера). Стоимость мала → НЕ спрашивать пользователя (кроме явного critical+сомнение). Пропустить при `--no-research`. → роли+judge ловят freshness-conflict (устаревшая версия/EOL/CVE).
+2c. **Fact-grounder (ВЫЗЫВАТЬ ВСЕГДА, кроме `--no-research`; non-blocking):**
+   ⚠️ **Решает скрипт, не ты.** `ground.py` сам классифицирует план: `tier=none` → ноль вызовов
+   движков, пустой stdout, стоимость нулевая. То есть безусловный вызов бесплатен, а пропуск шага —
+   нет. Замер 2026-08-20: за 135 прогонов панели ресёрч отработал ОДИН раз, при этом 63% планов
+   (43 из 68) по его же классификатору требовали веб-проверки — шаг не «срабатывал вхолостую»,
+   его просто не вызывали. Каждый такой прогон ушёл к ролям без сверки версий/EOL/CVE с вебом.
+   `ground.py` пишет факт вызова в свой ledger; `ledger.sh health` поднимает тревогу «РЕСЁРЧ НЕ ЗОВУТ».
+   Старая формулировка шага: `printf '%s' "<plan_text>" | python3 ~/.claude/skills/_shared/fact-grounder/ground.py` → stdout захватить как `research_brief` (пусто = ок, tier=none). Оркестратор зовёт ДО Workflow (движки — shell, песочница panel.js без FS). Дёшево (tier none→0 вызовов; light/critical→до 5 Tavily ~$0.04, scrub+бюджет-гард внутри адаптера). Стоимость мала → НЕ спрашивать пользователя (кроме явного critical+сомнение). Пропустить при `--no-research`. → роли+judge ловят freshness-conflict (устаревшая версия/EOL/CVE).
 3. **Сгенерировать телеметрию (ОБЯЗАТЕЛЬНО, до Workflow)** — песочница Workflow запрещает
    `Date.now()`, поэтому `timestamp` физически не может родиться внутри `panel.js`; без этих
    двух args он садится на дефолты `'now'` / `'unknown-run-id'` (`panel.js:126,137`) и прогон

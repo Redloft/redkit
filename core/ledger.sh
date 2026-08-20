@@ -310,6 +310,22 @@ health() {
       fi
     fi
   fi
+  # (г) ресёрч не зовут (2026-08-20). Тот же класс, что и «внешние судьи выпали»: шаг записан
+  #     прозой в SKILL.md и просто пропускается. Замер: за 135 прогонов панели fact-grounder
+  #     отработал ОДИН раз, при этом 63% планов по его же классификатору требовали веб-проверки.
+  #     Меряем ФАКТ ВЫЗОВА (ledger пишется даже при tier=none), а не «сколько раз сходили в веб».
+  local FG_DIR="${FG_HOME:-$HOME/.claude/skills/_shared/fact-grounder}"
+  local FGL="${FG_LEDGER:-$FG_DIR/ledger.jsonl}"
+  if [ "$recs" -ge 10 ] && [ -f "$FG_DIR/ground.py" ]; then
+    local last_run_r last_fg
+    last_run_r="$(tail -n "$W" "$L" | jq -rs '[.[].ts? // empty] | map(select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}"))) | max // ""' 2>/dev/null)"
+    last_run_r="${last_run_r:0:10}"
+    last_fg=""
+    [ -f "$FGL" ] && last_fg="$(jq -rs '[.[].ts? // empty] | max // ""' "$FGL" 2>/dev/null)" && last_fg="${last_fg:0:10}"
+    if [ -n "$last_run_r" ] && [ "${last_fg:-0000-00-00}" \< "$last_run_r" ]; then
+      warn="${warn}\n  ⚑ РЕСЁРЧ НЕ ЗОВУТ: последний вызов fact-grounder ${last_fg:-никогда} раньше последнего прогона $last_run_r — шаг пропускают (планы уходят к ролям без свежих веб-фактов)"
+    fi
+  fi
   echo "окно $recs прогонов: находок $finds · горячих тем $hot · свежих в карантине $qfresh"
   [ -n "$warn" ] && printf '%b\n' "$warn"
   return 0
@@ -523,6 +539,25 @@ CANON
   ! EJ_HOME="$EJT/ej" EJ_LEDGER="$EJT/ej/ledger.jsonl" EJ_ENABLE="" health "$EJT" | grep -q 'СУДЬИ ВЫПАЛИ'
   ok $? "судьи: тумблеры выключены → детектор молчит"
   rm -rf "$EJT"
+
+  # 17. Детектор «ресёрч не зовут» (2026-08-20). Меряет ФАКТ ВЫЗОВА fact-grounder, а не
+  #     число походов в веб: реальный дефект был именно в том, что шаг не вызывали вовсе.
+  local FGT="$T/fgt"; mkdir -p "$FGT/feedback" "$FGT/fg"
+  for i in $(seq 1 12); do
+    printf '{"ts":"2026-08-1%s_10-00","skill":"x","run_id":"f%s","entry_point":"finalize"}\n' "$((i%10))" "$i"
+  done > "$FGT/feedback/learnings.jsonl"
+  : > "$FGT/fg/ground.py"
+  printf '{"ts":"2026-07-01_10-00-00","tier":"none","claims":0}\n' > "$FGT/fg/ledger.jsonl"
+  FG_HOME="$FGT/fg" FG_LEDGER="$FGT/fg/ledger.jsonl" health "$FGT" | grep -q 'РЕСЁРЧ НЕ ЗОВУТ'
+  ok $? "ресёрч: вызовы отстали от прогонов → тревога"
+  printf '{"ts":"2026-08-19_10-00-00","tier":"none","claims":0}\n' >> "$FGT/fg/ledger.jsonl"
+  ! FG_HOME="$FGT/fg" FG_LEDGER="$FGT/fg/ledger.jsonl" health "$FGT" | grep -q 'РЕСЁРЧ НЕ ЗОВУТ'
+  ok $? "ресёрч: свежий вызов → тревоги нет (без ложных)"
+  # tier=none тоже считается вызовом: иначе «позвали, но проверять было нечего» выглядит как «не позвали»
+  printf '{"ts":"2026-08-19_11-00-00","tier":"none","claims":0}\n' > "$FGT/fg/ledger.jsonl"
+  ! FG_HOME="$FGT/fg" FG_LEDGER="$FGT/fg/ledger.jsonl" health "$FGT" | grep -q 'РЕСЁРЧ НЕ ЗОВУТ'
+  ok $? "ресёрч: tier=none засчитывается как вызов"
+  rm -rf "$FGT"
 
   # 11. Третье состояние: канон есть, но битый → fail-open к до-Ф1, а не пустота.
   echo '{ это не json' > "$C2/lenses/canon.json"

@@ -57,7 +57,11 @@ Workflow({scriptPath: "~/.claude/skills/finalize/workflow/stabilize.js",
 ### 2. Панель код-ревью (Workflow)
 **Архивариус (RedBrain-заземление, рекомендуется):** `bash ~/.claude/skills/redbrain/lib/archivist.sh "$PD/diff.patch"` → stdout захватить как `memory_brief` (пусто = ок). Оркестратор зовёт ДО Workflow (recall.py нужен диск/SQLite; subprocess, НЕ import). scope work fail-closed, fail-open. Пропустить при `--no-memory`. → «известные грабли/решения по этому проекту» в роли+judge.
 
-**Fact-grounder (свежие веб-факты, рекомендуется, non-blocking):** `python3 ~/.claude/skills/_shared/fact-grounder/ground.py < "$PD/diff.patch"` → stdout захватить как `research_brief` (пусто = tier none, ок). Тоже ДО Workflow (движки — shell). Дёшево (none→0 вызовов; иначе до 5 Tavily ~$0.04, scrub+бюджет-гард внутри). НЕ спрашивать (стоимость мала). Пропустить при `--no-research`/`--lite`. → роли+judge ловят freshness-conflict (EOL-версия/депрекейт-API/CVE в diff'е). Передать в Workflow args как `research_brief`.
+**Fact-grounder (ВЫЗЫВАТЬ ВСЕГДА, кроме `--no-research`/`--lite`; non-blocking):**
+⚠️ Решает скрипт, а не ты: `tier=none` → ноль вызовов движков и пустой stdout, поэтому
+безусловный вызов ничего не стоит. Пропуск шага стоит: план/дифф уходит к ролям без сверки
+версий, EOL и CVE с вебом. Замер 2026-08-20 — за всю историю шаг отработал один раз.
+Старая формулировка: `python3 ~/.claude/skills/_shared/fact-grounder/ground.py < "$PD/diff.patch"` → stdout захватить как `research_brief` (пусто = tier none, ок). Тоже ДО Workflow (движки — shell). Дёшево (none→0 вызовов; иначе до 5 Tavily ~$0.04, scrub+бюджет-гард внутри). НЕ спрашивать (стоимость мала). Пропустить при `--no-research`/`--lite`. → роли+judge ловят freshness-conflict (EOL-версия/депрекейт-API/CVE в diff'е). Передать в Workflow args как `research_brief`.
 ```
 Workflow({scriptPath: "~/.claude/skills/finalize/workflow/finalize.js", args: {
   diff_text: <содержимое PD/diff.patch>, changed_files: [...], memory_brief, research_brief,
