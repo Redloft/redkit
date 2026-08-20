@@ -100,6 +100,14 @@ cmd_lock() {
   if mkdir "$LK" 2>/dev/null; then :; else
     # есть лок — проверим stale
     local lpid lat
+    # ⚠ ОКНО ИНИЦИАЛИЗАЦИИ (нашёл флейк собственного race-теста, 2026-08-20): между успешным
+    # mkdir лока и записью .lock/at есть промежуток, в котором файла at ещё НЕТ. Читать его
+    # отсутствие как at=0 нельзя — это «протух» по формуле, и второй процесс уводил лок у
+    # того, кто его только что честно взял. Итог — ДВА держателя. Нет at → лок создаётся
+    # прямо сейчас, значит он живой, а не протухший.
+    if [ ! -f "$LK/at" ]; then
+      echo "✗ лок захватывается другим процессом прямо сейчас (heartbeat ещё не записан). exit." >&2; return 1
+    fi
     lpid="$(cat "$LK/pid" 2>/dev/null || echo 0)"; lat="$(cat "$LK/at" 2>/dev/null || echo 0)"
     local now; now="$(date +%s)"
     # ⚠ pid НЕ является признаком жизни: cmd_lock пишет $$ процесса state.sh, который умирает сразу после.
@@ -124,16 +132,38 @@ cmd_lock() {
     # на котором стоит вся стейт-машина. Найдено панелью 2026-08-20.
     # Примитив: rename(2) директории атомарен — сдвинуть протухший лок в сторону может
     # РОВНО ОДИН процесс, остальные получат ENOENT и честно проигрывают гонку.
-    local stale="$LK.stale.$$"
-    if mv "$LK" "$stale" 2>/dev/null; then
-      rm -rf "$stale" 2>/dev/null || true
-      if mkdir "$LK" 2>/dev/null; then
-        echo "⚠ stale lock (pid $lpid, heartbeat $(( now - lat ))s назад) — перехвачен" >&2
-      else
-        echo "✗ перехват не удался: лок занят другим процессом сразу после сдвига. exit." >&2; return 1
+    # ── ПЕРЕХВАТ ПОД ОТДЕЛЬНЫМ МЬЮТЕКСОМ ────────────────────────────────────────
+    # Почему не «просто сдвинуть протухший лок в сторону»: решение «протух» принимается
+    # по СНИМКУ, а операция идёт позже. Любая схема на mv/rm без сериализации даёт либо
+    # двух держателей, либо ноль (победитель теряет каталог, пока пишет в него, потому что
+    # чужой откат его уносит). Оба состояния воспроизведены эмпирически 2026-08-20.
+    # Решение: право на перехват само по себе — CAS через mkdir. Держатель мьютекса
+    # единственный, поэтому внутри него rm -rf + mkdir безопасны.
+    local RC="$LK.reclaim"
+    if mkdir "$RC" 2>/dev/null; then
+      # перечитываем состояние ПОД мьютексом: за время ожидания лок мог стать живым
+      local lat2; lat2="$(cat "$LK/at" 2>/dev/null || echo "")"
+      local now2; now2="$(date +%s)"
+      if [ -z "$lat2" ]; then
+        rmdir "$RC" 2>/dev/null || true
+        echo "✗ лок захватывается другим процессом прямо сейчас (heartbeat ещё не записан). exit." >&2; return 1
       fi
+      if [ $(( now2 - lat2 )) -lt "$(_lock_ttl)" ]; then
+        rmdir "$RC" 2>/dev/null || true
+        echo "✗ лок ожил, пока ждали право на перехват (heartbeat $(( now2 - lat2 ))s назад). exit." >&2; return 1
+      fi
+      rm -rf "$LK" 2>/dev/null || true
+      if mkdir "$LK" 2>/dev/null; then
+        echo "$$" > "$LK/pid"; echo "$now2" > "$LK/at"; echo "$(_lock_ttl)" > "$LK/ttl"
+        rmdir "$RC" 2>/dev/null || true
+        echo "⚠ stale lock (pid $lpid, heartbeat $(( now2 - lat2 ))s назад) — перехвачен" >&2
+        echo "✓ locked ($rd, pid $$)"
+        return 0
+      fi
+      rmdir "$RC" 2>/dev/null || true
+      echo "✗ перехват не удался: лок занят сразу после очистки. exit." >&2; return 1
     else
-      echo "✗ проиграли гонку за перехват протухшего лока (перехватил другой процесс). exit." >&2; return 1
+      echo "✗ другой процесс уже перехватывает протухший лок. exit." >&2; return 1
     fi
   fi
   echo "$$" > "$LK/pid"; date +%s > "$LK/at"; echo "$(_lock_ttl)" > "$LK/ttl"
@@ -164,14 +194,21 @@ self_test() {
     echo 1 > "$T/run/.lock/pid"; echo 0 > "$T/run/.lock/at"   # заведомо протухший
     local i
     for i in 1 2 3 4 5 6 7 8; do
-      ( cmd_lock "$T/run" >/dev/null 2>&1 && echo W >> "$T/won" ) &
+      ( out="$(cmd_lock "$T/run" 2>/dev/null)" && { echo W >> "$T/won"; printf '%s' "$out" | sed -n 's/.*pid \([0-9]*\))$/\1/p' > "$T/winpid"; } ) &
     done
     wait
     local won; won="$(wc -l < "$T/won" 2>/dev/null | tr -d ' ')"; won="${won:-0}"
-    local stale; stale="$(find "$T/run" -maxdepth 1 -name '.lock.stale.*' 2>/dev/null | wc -l | tr -d ' ')"
+    # хвосты служебных каталогов (перехват/мьютекс) не должны переживать гонку
+    local junk; junk="$(find "$T/run" -maxdepth 1 \( -name '.lock.stale.*' -o -name '.lock.reclaim' -o -name '.lock.new.*' \) 2>/dev/null | wc -l | tr -d ' ')"
+    # pid в финальном локе обязан принадлежать победителю, а не проигравшему
+    local lockpid; lockpid="$(cat "$T/run/.lock/pid" 2>/dev/null || echo "")"
+    local winpid; winpid="$(cat "$T/winpid" 2>/dev/null || echo "")"
     rm -rf "$T"
+    # 0 держателей — такой же провал, как 2: значит перехват съел сам себя
     [ "$won" = "1" ] || { echo "  ✗ гонка за лок: держателей $won, ожидался ровно 1"; return 1; }
-    [ "$stale" = "0" ] || { echo "  ✗ гонка за лок: остались .stale-хвосты ($stale)"; return 1; }
+    [ "$junk" = "0" ] || { echo "  ✗ гонка за лок: остались служебные хвосты ($junk)"; return 1; }
+    [ -n "$lockpid" ] || { echo "  ✗ гонка за лок: в локе нет pid — держатель не дописал состояние"; return 1; }
+    [ "$lockpid" = "$winpid" ] || { echo "  ✗ гонка за лок: pid в локе ($lockpid) не совпадает с победителем ($winpid)"; return 1; }
     return 0
   }
   _race_test || fail=1
@@ -236,7 +273,8 @@ case "${1:-}" in
   touch) cmd_touch "${2:?}" ;;
   unlock) cmd_unlock "${2:?}" ;;
   validate-no-secrets) validate_no_secrets "${2:-}" ;;
+  ttl)        _lock_ttl ;;
   health)     cmd_health ;;
   --self-test) self_test ;;
-  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|touch|unlock|health|validate-no-secrets|--self-test" >&2; exit 1 ;;
+  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|touch|unlock|ttl|health|validate-no-secrets|--self-test" >&2; exit 1 ;;
 esac

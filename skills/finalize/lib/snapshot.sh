@@ -51,10 +51,20 @@ snapshot() {
   if [ "$(wc -l < "$full")" != "$(wc -l < "$noent")" ]; then
     echo "✗ strip дал разное число строк в двух режимах → abort (склейка небезопасна)" >&2; _snap_clean; return 1
   fi
+  # ⚠ Заголовок определяется СОСТОЯНИЕМ, а не регекспом по строке. Наивное `^--- ` матчит
+  # не только заголовок: удалённая строка SQL/Lua-комментария `-- key=…` выглядит в дифе как
+  # `--- key=…` и уехала бы в --no-entropy, то есть секрет в ней пережил бы редакцию.
+  # Проверено живьём 2026-08-20 (нашёл внешний судья, панель из 5 ролей пропустила).
+  # Заголовочная зона: от `diff --git` до первого `@@` этого файла. Внутри неё ---/+++/index/
+  # mode/rename — метаданные; после @@ и до следующего `diff --git` всё это уже тело.
   awk 'NR==FNR{a[FNR]=$0; next}
-       {  if ($0 ~ /^(diff --git |index |--- |\+\+\+ |@@|old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to |Binary files )/)
-            print a[FNR];
-          else print $0 }' "$noent" "$full" > "$tmp" || { echo "✗ склейка дифа не удалась → abort" >&2; _snap_clean; return 1; }
+       {
+         if ($0 ~ /^diff --git /) { inhdr=1; print a[FNR]; next }
+         if ($0 ~ /^@@/)          { inhdr=0; print a[FNR]; next }
+         if (inhdr && $0 ~ /^(index |--- |\+\+\+ |old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to |Binary files )/)
+              print a[FNR];
+         else print $0
+       }' "$noent" "$full" > "$tmp" || { echo "✗ склейка дифа не удалась → abort" >&2; _snap_clean; return 1; }
   rm -f "$raw" "$full" "$noent"
   mv -f "$tmp" "$pd/diff.patch"
   echo "$count"
@@ -100,6 +110,18 @@ self_test() {
     && { echo "✗ два прохода: секрет со слэшем прошёл в тело дифа"; fail=1; }
   grep -q '‹REDACTED' "$pd4/diff.patch" \
     || { echo "✗ два прохода: секрет не затёрт вовсе"; fail=1; }
+  # ── ГЛАВНЫЙ EDGE-CASE ДВУХПРОХОДНОЙ СХЕМЫ (нашёл внешний судья 2026-08-20) ───
+  # Удалённая строка SQL/Lua-комментария `-- key=…` выглядит в дифе как `--- key=…`
+  # и при регексп-детекции заголовка уезжала в --no-entropy вместе с секретом.
+  # Заголовок обязан определяться СОСТОЯНИЕМ (зона от `diff --git` до первого `@@`).
+  printf 'base\n-- key=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n' > "$repo/a.txt"
+  git -C "$repo" add -A; git -C "$repo" commit -qm sqlcomment
+  printf 'base\n' > "$repo/a.txt"      # теперь строка УДАЛЕНА → в дифе станет "--- key=…"
+  local pd5="$T/run5"; mkdir -p "$pd5"; snapshot "$repo" "$pd5" working >/dev/null
+  grep -q 'wJalrXUtnFEMI' "$pd5/diff.patch" \
+    && { echo "✗ секрет в удалённой строке '-- key=' пережил редакцию (заголовок детектится регекспом, а не состоянием)"; fail=1; }
+  grep -q '^--- a/a.txt' "$pd5/diff.patch" \
+    || { echo "✗ настоящий заголовок --- a/a.txt потерян"; fail=1; }
   # empty diff case
   git -C "$repo" add -A; git -C "$repo" commit -qm change
   local pd2="$T/run2"; mkdir -p "$pd2"
