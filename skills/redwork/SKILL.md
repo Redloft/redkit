@@ -120,6 +120,11 @@ Exit-коды: `0` ok · `1` контракт · `2` BUDGET_EXCEEDED · `3` stat
 **State-гигиена — механизирована в `step.sh` (не полагаться на текст).** Фазу нельзя продвинуть, не записав
 одновременно phase+phase_status+event+heartbeat; бюджет инкрементит `step.sh llm`; ledger пишет `end --done`;
 брошенные ловит `step.sh sweep` + Stop-хук `~/.claude/hooks/redwork-sweep.sh`. Детали — шапка `lib/step.sh`.
+Хук лежит ВНЕ дерева скилла (значит не едет в репо) — наличие и регистрацию проверяет
+`bash lib/state.sh health`. **Восстановление после краша:** санкционированный путь — `bash lib/state.sh unlock <run_dir>`,
+НЕ ручное удаление `.lock` (оно обходит инвариант «один run на repo»). Лок считается живым по
+свежести heartbeat в пределах `REDWORK_LOCK_TTL_SEC` (дефолт 43200с ≈ 12ч, по эмпирике пауз 6.9ч);
+тот же порог читает `migrate.sh`, чтобы не мигрировать схему под работающим раном.
 
 **Каналы эскалации step.sh/sweep: ТОЛЬКО TG + durable `escalations.log`.** В Я.Трекер они не пишут — там
 fail-closed money-guard, а detail/note машинные (риск и молчаливой резки хуком, и утечки суммы). Коммент

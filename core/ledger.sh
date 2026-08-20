@@ -25,7 +25,7 @@ _ledger_path() { echo "$1/feedback/learnings.jsonl"; }
 # К ним применяется паттерн-редакция, но НЕ Shannon-эвристика: она даёт на них чистый
 # false positive (uuid и `<ts>-<slug>` ≥20 симв. → high-entropy). Проверено 2026-07-27:
 # 3 из 71 записи ledger'а уже потеряли run_id именно так, и телеметрия стала неизмеримой.
-LEDGER_SERVICE_KEYS='run_id,ts,skill,mode,entry_point,verdict,remainder_class,iteration,telemetry_ok,telemetry_repaired,confidence,conflicts_count'
+LEDGER_SERVICE_KEYS='run_id,ts,skill,mode,entry_point,verdict,remainder_class,iteration,telemetry_ok,telemetry_repaired,telemetry_clobber,confidence,conflicts_count'
 
 # --- Ф6 (2026-08-19): починка телеметрии НА ЗАПИСИ, а не уговорами caller'а -----------------
 # Контракт «передай timestamp/run_id/entry_point» жил прозой в SKILL.md — и пропускался:
@@ -35,6 +35,9 @@ LEDGER_SERVICE_KEYS='run_id,ts,skill,mode,entry_point,verdict,remainder_class,it
 #
 # Принцип: НИКОГДА не терять прогон (append случается после дорогого прогона), но и не врать.
 #   ts='now'/пусто        → реальная дата момента записи (append идёт через минуты после прогона)
+#     ⚠ КОНТРАКТ ДЛЯ ЧИТАТЕЛЕЙ: у ПОЧИНЕННОЙ записи ts — это время APPEND'а, а не прогона.
+#     Отличать по telemetry_ok==false / telemetry_repaired[]. Любой анализ по времени прогона
+#     обязан фильтровать такие записи, иначе меряет момент записи в журнал.
 #   run_id пустой/дефолт  → чеканим 'late-<uuid>' (записи различимы) + telemetry_ok=false
 #   entry_point нет       → 'untagged' + telemetry_ok=false
 # telemetry_repaired[] — что именно чинили; поле видно в stat, чтобы «почин» не выглядел здоровьем.
@@ -73,6 +76,10 @@ _normalize_telemetry() {
     | (if $bad_ts then .ts = $now else . end)
     | (if $bad_rid then .run_id = $mint else . end)
     | (if $ep != "" then .entry_point = $ep else . end)
+    # clobber_note: флаг перебил НЕПУСТОЙ и НЕ-плейсхолдерный entry_point из JSON. Это
+    # штатное поведение (вызывающая сторона знает точнее), но молчать нельзя: иначе
+    # разбивка stat по entry_point покажет не того caller-а, и течь будут искать не там.
+    | (if ($ep != "" and $ep0 != "" and $ep0 != $ep) then .telemetry_clobber = $ep0 else . end)
     | (if $bad_ep then .entry_point = "untagged" else . end)
     | (if ($bad_ts or $bad_rid or $bad_ep) then .telemetry_ok = false else . end)
     | (if ($bad_ts or $bad_rid or $bad_ep)
@@ -101,6 +108,8 @@ append() {
   if [ -n "$normalized" ] && printf '%s' "$normalized" | jq -e . >/dev/null 2>&1; then
     local repaired; repaired="$(printf '%s' "$normalized" | jq -r '(.telemetry_repaired // []) | join(", ")')"
     [ -z "$repaired" ] || echo "⚑ ledger: телеметрия починена на записи ($repaired) — caller не передал; прогон помечен telemetry_ok=false" >&2
+    local clob; clob="$(printf '%s' "$normalized" | jq -r '.telemetry_clobber // ""')"
+    [ -z "$clob" ] || echo "⚑ ledger: --entry-point перебил значение из JSON ($clob → $ep_arg) — разбивка stat покажет caller-а по флагу" >&2
     line="$normalized"
   else
     echo "⚑ ledger: нормализация телеметрии не удалась → пишем как есть" >&2

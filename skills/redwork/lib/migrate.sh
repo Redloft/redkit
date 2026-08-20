@@ -36,7 +36,11 @@ run() {
     if [ "$sv" != "1" ]; then echo "⚠ пропуск (schema_version=$sv, не 1): $d"; n_skip=$((n_skip+1)); continue; fi
     if [ -d "$d/.lock" ]; then
       local lat; lat="$(cat "$d/.lock/at" 2>/dev/null || echo 0)"
-      if [ $(( $(date +%s) - ${lat:-0} )) -lt 3600 ]; then
+      # Порог «ран ещё жив» обязан совпадать с тем, по которому живость определяет
+      # state.sh cmd_lock (REDWORK_LOCK_TTL_SEC, дефолт 43200с ≈ 12ч по эмпирике 6.9ч).
+      # Своя константа 3600 означала: ран в законной ночной паузе получал миграцию
+      # schema_version прямо посреди работы. Найдено панелью 2026-08-20.
+      if [ $(( $(date +%s) - ${lat:-0} )) -lt "${REDWORK_LOCK_TTL_SEC:-43200}" ]; then
         echo "⚠ пропуск (активен, свежий lock): $d"; n_skip=$((n_skip+1)); continue
       fi
     fi

@@ -106,19 +106,76 @@ cmd_lock() {
     # Признак жизни = СВЕЖЕСТЬ .lock/at (её обновляет step.sh на каждом тике). Раньше проверка pid-а
     # делала любой лок мгновенно stale → инвариант «один run/repo» фактически не работал.
     if [ $(( now - lat )) -lt "$(_lock_ttl)" ]; then
-      echo "✗ run уже активен (heartbeat $(( now - lat ))s назад) — один redwork на repo. exit." >&2; return 1
+      local age=$(( now - lat ))
+      echo "✗ run уже активен (heartbeat ${age}s назад) — один redwork на repo. exit." >&2
+      # heartbeat обновляет step.sh на каждом тике; тишина в часы означает либо длинную
+      # легитимную паузу, либо краш. Отличить снаружи нельзя — поэтому подсказываем путь.
+      if [ "$age" -gt 3600 ]; then
+        echo "  ⚠ тишина ${age}s (> 1ч). Если ран упал — санкционированный путь: bash lib/state.sh unlock <run_dir>." >&2
+        echo "    Ручное удаление .lock обходит защиту инварианта «один run на repo» — не делать." >&2
+        echo "    Брошенные раны штатно подбирает step.sh sweep + Stop-хук ~/.claude/hooks/redwork-sweep.sh." >&2
+      fi
+      return 1
     fi
-    echo "⚠ stale lock (pid $lpid) — reclaim" >&2; rm -rf "$LK"; mkdir "$LK"
+    # ── ПЕРЕХВАТ ПРОТУХШЕГО ЛОКА (атомарный, 2026-08-20) ──────────────────────
+    # Было `rm -rf "$LK"; mkdir "$LK"` — НЕ атомарно: два процесса могли одновременно
+    # пройти проверку staleness, после чего rm второго сносил свежий лок первого, и оба
+    # считали себя единственными держателями. Это ровно тот инвариант («один run на repo»),
+    # на котором стоит вся стейт-машина. Найдено панелью 2026-08-20.
+    # Примитив: rename(2) директории атомарен — сдвинуть протухший лок в сторону может
+    # РОВНО ОДИН процесс, остальные получат ENOENT и честно проигрывают гонку.
+    local stale="$LK.stale.$$"
+    if mv "$LK" "$stale" 2>/dev/null; then
+      rm -rf "$stale" 2>/dev/null || true
+      if mkdir "$LK" 2>/dev/null; then
+        echo "⚠ stale lock (pid $lpid, heartbeat $(( now - lat ))s назад) — перехвачен" >&2
+      else
+        echo "✗ перехват не удался: лок занят другим процессом сразу после сдвига. exit." >&2; return 1
+      fi
+    else
+      echo "✗ проиграли гонку за перехват протухшего лока (перехватил другой процесс). exit." >&2; return 1
+    fi
   fi
   echo "$$" > "$LK/pid"; date +%s > "$LK/at"; echo "$(_lock_ttl)" > "$LK/ttl"
   echo "✓ locked ($rd, pid $$)"
 }
 # touch: обновить heartbeat лока (зовёт step.sh на каждом тике; без него живой run выглядит протухшим)
 cmd_touch() { local LK="${1:?run_dir}/.lock"; [ -d "$LK" ] || return 0; date +%s > "$LK/at"; }
+# health: внешние зависимости, о которых SKILL.md говорит как о штатных, но которые лежат
+# ВНЕ дерева скилла (значит не едут в репо и ничем не проверяются). Молчит, когда всё на месте.
+cmd_health() {
+  local hook="$HOME/.claude/hooks/redwork-sweep.sh" st="$HOME/.claude/settings.json" warn=""
+  [ -f "$hook" ] || warn="${warn}\n  ⚑ нет Stop-хука $hook — брошенные раны держат repo-lock до $(_lock_ttl)с"
+  if [ -f "$st" ] && ! grep -q 'redwork-sweep' "$st" 2>/dev/null; then
+    warn="${warn}\n  ⚑ redwork-sweep.sh не зарегистрирован в settings.json (hooks.Stop) — автоподбор брошенных ранов не сработает"
+  fi
+  if [ -n "$warn" ]; then printf '%b\n' "$warn"; return 1; fi
+  echo "✓ redwork health: sweep-хук на месте и зарегистрирован"
+}
 cmd_unlock() { rm -rf "${1:?run_dir}/.lock" 2>/dev/null || true; echo "✓ unlocked"; }
 
 self_test() {
   set +e; local T; T="$(mktemp -d)"; export REDWORK_DATA_DIR="$T"; local fail=0
+  # ── ГОНКА ЗА ПЕРЕХВАТ ПРОТУХШЕГО ЛОКА (2026-08-20) ──────────────────────────
+  # Инвариант «один run на repo» держится только если перехват атомарен. Прежний
+  # `rm -rf; mkdir` пропускал двух держателей одновременно. Гоним 8 параллельных.
+  _race_test() {
+    local T; T="$(mktemp -d)"; mkdir -p "$T/run/.lock"
+    echo 1 > "$T/run/.lock/pid"; echo 0 > "$T/run/.lock/at"   # заведомо протухший
+    local i
+    for i in 1 2 3 4 5 6 7 8; do
+      ( cmd_lock "$T/run" >/dev/null 2>&1 && echo W >> "$T/won" ) &
+    done
+    wait
+    local won; won="$(wc -l < "$T/won" 2>/dev/null | tr -d ' ')"; won="${won:-0}"
+    local stale; stale="$(find "$T/run" -maxdepth 1 -name '.lock.stale.*' 2>/dev/null | wc -l | tr -d ' ')"
+    rm -rf "$T"
+    [ "$won" = "1" ] || { echo "  ✗ гонка за лок: держателей $won, ожидался ровно 1"; return 1; }
+    [ "$stale" = "0" ] || { echo "  ✗ гонка за лок: остались .stale-хвосты ($stale)"; return 1; }
+    return 0
+  }
+  _race_test || fail=1
+
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   local rd; rd="$(cmd_init "$(_slug 'task: "fix" promo\nbug')" 'fix promo bug' '/tmp/repo' 2 'redwork/x')"
   ok $? "init"
@@ -179,6 +236,7 @@ case "${1:-}" in
   touch) cmd_touch "${2:?}" ;;
   unlock) cmd_unlock "${2:?}" ;;
   validate-no-secrets) validate_no_secrets "${2:-}" ;;
+  health)     cmd_health ;;
   --self-test) self_test ;;
-  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|touch|unlock|validate-no-secrets|--self-test" >&2; exit 1 ;;
+  *) echo "usage: state.sh slug|init|get|set_str|set_json|lock|touch|unlock|health|validate-no-secrets|--self-test" >&2; exit 1 ;;
 esac

@@ -153,6 +153,9 @@ call_gemini() {
   payload=$(jq -nc --arg p "$PROMPT" '{
     contents: [{parts: [{text: $p}]}],
     generationConfig: {
+      # 1.0 = дефолт Gemini. Для рассуждающих моделей Google прямо рекомендует его не занижать:
+      # ниже 1.0 растёт риск зацикливания и деградации разбора. Было 0.3 — привычка с
+      # до-thinking эпохи; выровнено 2026-08-19 по обеим копиям файла.
       temperature: 1.0,
       responseMimeType: "application/json"
     }

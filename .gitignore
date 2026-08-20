@@ -22,3 +22,5 @@ __pycache__/
 !**/jobs.example.yaml
 
 core/publish-gate.names
+
+.finalize/

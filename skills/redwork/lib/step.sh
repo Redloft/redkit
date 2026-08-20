@@ -60,7 +60,7 @@ cmd_begin() {
   local rd="${1:?run_dir}"; _RD_FOR_TRAP="$rd"
   [ -f "$rd/state.json" ] || _die 3 "нет state.json: $rd"
   local sv; sv="$(_get "$rd" '.schema_version')" || _die 3 "state нечитаем (schema?)"
-  [ "$sv" = "2" ] || _die 3 "state schema_version=$sv, нужен v2 → прогони: bash lib/migrate.sh <run_dir>"
+  [ "$sv" = "2" ] || _die 3 "state schema_version=$sv, нужен v2 → прогони: bash lib/migrate.sh apply"
   bash "$STATE" lock "$rd" >/dev/null 2>&1 || _die 4 "lock занят — на этом repo уже активен redwork-run"
 
   local blocked; blocked="$(_get "$rd" '.blocked_on')"

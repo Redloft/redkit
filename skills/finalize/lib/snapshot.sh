@@ -30,7 +30,32 @@ snapshot() {
   printf '%s\n' "$names" > "$pd/changed_files.txt"
   # diff → strip → atomic write (сырое НИКОГДА на диск)
   local tmp="$pd/.diff.patch.tmp.$$"
-  if ! "${diffcmd[@]}" 2>/dev/null | "$STRIP" > "$tmp"; then echo "✗ strip failed → abort, no diff written" >&2; rm -f "$tmp"; return 1; fi
+  local raw="$pd/.diff.raw.tmp.$$" full="$pd/.diff.full.tmp.$$" noent="$pd/.diff.noent.tmp.$$"
+  # Сырое НИКОГДА не остаётся на диске: чистим на каждом выходе (trap RETURN здесь не годится —
+  # он срабатывает, когда local-переменные уже вне области видимости, и падает под set -u).
+  _snap_clean() { rm -f "$raw" "$full" "$noent" "$tmp" 2>/dev/null || true; }
+  if ! "${diffcmd[@]}" 2>/dev/null > "$raw"; then echo "✗ diff failed → abort, no diff written" >&2; _snap_clean; return 1; fi
+  # ── ДВА ПРОХОДА (2026-08-20) ────────────────────────────────────────────────
+  # Заголовки дифа (diff --git / --- / +++ / index / @@ / rename / mode / Binary) — машинные
+  # метаданные, и Shannon-эвристика съедала в них ИМЕНА ФАЙЛОВ: слэш склеивает сегменты пути
+  # в один высокоэнтропийный токен, и роли получали хунки без указания файла. Раньше это чинили
+  # удалением "/" из класса символов — но так ломается единственная защита для секретов без
+  # известного префикса (AWS secret access key: 40 base64-символов со слэшами). Панель поймала
+  # это как critical четырьмя ролями и воспроизвела живьём.
+  # Поэтому чиним НА ЭТОМ слое: заголовки — через --no-entropy (паттерны sk-/ghp_/PEM остаются),
+  # тело — полным проходом. Защита не ослаблена нигде, имена файлов целы там, где нужны.
+  # Склейка по номерам строк безопасна: strip — регексп-замена, число строк не меняет
+  # (проверяется в self-test ниже).
+  if ! "$STRIP" < "$raw" > "$full"; then echo "✗ strip failed → abort, no diff written" >&2; _snap_clean; return 1; fi
+  if ! "$STRIP" --no-entropy < "$raw" > "$noent"; then echo "✗ strip(--no-entropy) failed → abort" >&2; _snap_clean; return 1; fi
+  if [ "$(wc -l < "$full")" != "$(wc -l < "$noent")" ]; then
+    echo "✗ strip дал разное число строк в двух режимах → abort (склейка небезопасна)" >&2; _snap_clean; return 1
+  fi
+  awk 'NR==FNR{a[FNR]=$0; next}
+       {  if ($0 ~ /^(diff --git |index |--- |\+\+\+ |@@|old mode |new mode |new file mode |deleted file mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to |Binary files )/)
+            print a[FNR];
+          else print $0 }' "$noent" "$full" > "$tmp" || { echo "✗ склейка дифа не удалась → abort" >&2; _snap_clean; return 1; }
+  rm -f "$raw" "$full" "$noent"
   mv -f "$tmp" "$pd/diff.patch"
   echo "$count"
 }
@@ -64,6 +89,17 @@ self_test() {
     || { echo "✗ путь файла уничтожен strip-ом в заголовке дифа (роли не увидят, что за файл)"; fail=1; }
   grep -q '‹REDACTED' "$pd3/diff.patch" \
     && { echo "✗ ложная редакция в дифе без секретов"; fail=1; }
+  # ── ДВА ПРОХОДА: заголовок целый И секрет со слэшем в ТЕЛЕ затёрт ────────────
+  # Раньше эти два свойства конфликтовали: чинили заголовки — теряли защиту от секретов
+  # со слэшем (AWS-подобных). Теперь оба обязаны держаться одновременно.
+  printf 'ok\nkey=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n' > "$repo/skills/_shared/external-judge/config.sh"
+  local pd4="$T/run4"; mkdir -p "$pd4"; snapshot "$repo" "$pd4" working >/dev/null
+  grep -q 'skills/_shared/external-judge/config.sh' "$pd4/diff.patch" \
+    || { echo "✗ два прохода: имя файла в заголовке потеряно"; fail=1; }
+  grep -q 'wJalrXUtnFEMI' "$pd4/diff.patch" \
+    && { echo "✗ два прохода: секрет со слэшем прошёл в тело дифа"; fail=1; }
+  grep -q '‹REDACTED' "$pd4/diff.patch" \
+    || { echo "✗ два прохода: секрет не затёрт вовсе"; fail=1; }
   # empty diff case
   git -C "$repo" add -A; git -C "$repo" commit -qm change
   local pd2="$T/run2"; mkdir -p "$pd2"
