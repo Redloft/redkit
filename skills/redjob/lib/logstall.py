@@ -155,13 +155,44 @@ def scan(job, now=None):
         age_h = (now - os.path.getmtime(path)) / 3600.0
 
         if stalled:
-            sig, n = max(stalled, key=lambda kv: kv[1])
+            # ⚑ Раньше брали ТОЛЬКО самую частую подпись, и второй независимый затык в том
+            # же логе оставался невидим — детектор сообщал бы «одна ошибка», умалчивая о
+            # других. Сообщаем о самой частой, но если заклинивших подписей несколько —
+            # говорим об этом вслух (no silent cap), а не прячем за max().
+            stalled.sort(key=lambda kv: kv[1], reverse=True)
+            sig, n = stalled[0]
+            extra = ""
+            if len(stalled) > 1:
+                extra = (f" [ещё заклинивших подписей: {len(stalled) - 1}, суммарно "
+                         f"×{sum(v for _k, v in stalled[1:])}]")
             # ⚑ Окно времени. Берём последние MIN_REPEATS датированных вхождений этой
             # подписи: если они размазаны шире пяти периодов джобы — это редкие
             # транзиенты, а не заклинивший ретрай. Строки без даты окно не судят
             # (возвращаемся к прежнему поведению, чтобы не ослепнуть на таких логах).
             occ = [t for t in (_ts(l) for l in errs if _sig(l) == sig) if t]
             per = _period_sec(job) or 86400
+            if occ:
+                # ⚑ Плотность ≠ свежесть. Пойман на живом парке: доминировала
+                # пачка ошибок двухдневной давности — три последних вхождения
+                # стояли подряд, окно считало «заклинило», а джоба с тех пор успешно
+                # отработала десятки раз. Ложный CRITICAL ушёл в Telegram. Поэтому:
+                # (а) само вхождение должно быть свежим, (б) джоба не должна успешно
+                # писать в соседний поток ПОСЛЕ последнего появления этой подписи.
+                if now - occ[-1] > 5 * per:
+                    out.append(("INFO",
+                                f"в {kind}-логе ошибка ×{n}, но последнее её появление "
+                                f"{(now - occ[-1]) / 86400:.1f} сут назад при периоде "
+                                f"{per / 3600:.1f} ч — старая пачка, не заклинило. "
+                                f"Подпись: {sig[:90]}{extra}", None))
+                    continue
+                other_p = logs.get("out" if kind == "err" else "err")
+                if (other_p and os.path.exists(other_p) and os.path.getsize(other_p) > 0
+                        and os.path.getmtime(other_p) > occ[-1] + 60):
+                    out.append(("INFO",
+                                f"в {kind}-логе ошибка ×{n}, но соседний лог пополнялся "
+                                f"ПОСЛЕ последнего её появления — выкарабкалась. "
+                                f"Подпись: {sig[:90]}{extra}", None))
+                    continue
             if len(occ) >= MIN_REPEATS:
                 span = occ[-1] - occ[-MIN_REPEATS]
                 if span > 5 * per:
@@ -182,18 +213,18 @@ def scan(job, now=None):
             if recovered:
                 out.append(("INFO",
                             f"в {kind}-логе повторяющаяся ошибка ×{n}, но соседний лог "
-                            f"пополнялся позже — джоба выкарабкалась. Подпись: {sig[:90]}",
+                            f"пополнялся позже — джоба выкарабкалась. Подпись: {sig[:90]}{extra}",
                             None))
             elif any(m.search(sig) for m in mutes):
                 out.append(("INFO",
                             f"в {kind}-логе повторяющаяся ошибка ×{n} — ЗАГЛУШЕНО по "
                             f"logstall_ignore ({job.get('logstall_ignore_why') or 'причина не указана'}). "
-                            f"Подпись: {sig[:90]}", None))
+                            f"Подпись: {sig[:90]}{extra}", None))
             else:
                 out.append(("CRITICAL",
                             f"тихий отказ с ретраем в {kind}-логе: одна и та же ошибка ×{n}, "
                             f"и последнее слово лога — она же (запись {age_h:.0f} ч назад). "
-                            f"Подпись: {sig[:90]}",
+                            f"Подпись: {sig[:90]}{extra}",
                             f"прочитай {path}; джоба крутится вхолостую и никого не зовёт"))
         else:
             sig, n = max(counts.items(), key=lambda kv: kv[1])

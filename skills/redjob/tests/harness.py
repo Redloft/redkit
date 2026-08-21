@@ -666,6 +666,46 @@ def run():
 
     _sh.rmtree(_d, ignore_errors=True)
 
+    # (9) Два независимых затыка в одном логе: второй не должен молчать.
+    _two = ([f"[ERROR] {_st(0)} FAILED соединение с узлом А" for _ in range(4)]
+            + [f"[ERROR] {_st(0)} FAILED разбор ответа узла Б" for _ in range(4)])
+    _d2 = _tf.mkdtemp()
+    _p9 = _mklog(_d2, "two.err.log", _two, _now - 3600)
+    _r9 = _ls.scan({"logs": {"err": _p9}, "schedule": {"interval_sec": 3600}}, now=_now)
+    if any("ещё заклинивших подписей" in m for _s, m, _f in _r9):
+        print("  ✓ logstall          второй затык в том же логе не умалчивается")
+    else:
+        failures.append(f"logstall: второй затык скрыт за max() ({_r9})")
+        print("  ✗ logstall: второй затык скрыт за max()")
+    _sh.rmtree(_d2, ignore_errors=True)
+
+    # (10) Плотность ≠ свежесть: старая ПАЧКА ошибок не заклинивание.
+    # Живой случай: доминировали ошибки двухдневной давности, стоявшие подряд, а джоба
+    # с тех пор успешно отработала десятки раз — ушёл ложный CRITICAL в мессенджер.
+    _d3 = _tf.mkdtemp()
+    _burst = [f"[ERROR] {_st(2)} FAILED init client" for _ in range(5)]
+    _pb = _mklog(_d3, "burst.err.log", _burst, _now - 2 * 86400)
+    _rb = _ls.scan({"logs": {"err": _pb}, "schedule": {"interval_sec": 1800}}, now=_now)
+    if not any(sev == "CRITICAL" for sev, _m, _f in _rb):
+        print("  ✓ logstall          старая плотная пачка не идёт в CRITICAL")
+    else:
+        failures.append(f"logstall: старая пачка принята за заклинивание ({_rb})")
+        print("  ✗ logstall: старая пачка принята за заклинивание")
+
+    # (11) Успех ПОСЛЕ последнего появления подписи снимает тревогу, даже если
+    # соседний лог в целом старше файла ошибок (в него позже упала другая ошибка).
+    _pe = _mklog(_d3, "mix.err.log",
+                 [f"[ERROR] {_st(2)} FAILED init client" for _ in range(4)]
+                 + ["fetch failed: разовый сбой"], _now - 60)
+    _po = _mklog(_d3, "mix.out.log", ["ok: работаю"], _now - 1800)
+    _rm = _ls.scan({"logs": {"err": _pe, "out": _po}, "schedule": {"interval_sec": 1800}}, now=_now)
+    if not any(sev == "CRITICAL" for sev, _m, _f in _rm):
+        print("  ✓ logstall          успех после последней ошибки снимает тревогу")
+    else:
+        failures.append(f"logstall: успех после ошибки не учтён ({_rm})")
+        print("  ✗ logstall: успех после ошибки не учтён")
+    _sh.rmtree(_d3, ignore_errors=True)
+
     # ── redjob-watch.sh: сбой запуска doctor ≠ «находок ноль» ───────────────────
     # Пробел, названный панелью код-ревью 2026-08-21: восемь asserts покрывали logstall,
     # а единственный новый shell-файл — где и жил critical — не покрыт ничем.

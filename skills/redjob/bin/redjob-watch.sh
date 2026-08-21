@@ -33,6 +33,22 @@ LOG="${REDJOB_LOG:-$HOME/.cache/redjob/watch.log}"
 mkdir -p "$(dirname "$STATE")"
 REMIND_DAYS="${REDJOB_REMIND_DAYS:-7}"
 
+# ⚑ `timeout` на macOS НЕ штатный — приходит из homebrew-coreutils. Нашли внешние судьи;
+# иронично, что «missing gtimeout» этот же скилл держит в списке известных классов поломок.
+# Без фолбэка сторож молча падал бы на машине без coreutils. Совсем без таймаута тоже нельзя:
+# зависший doctor заблокировал бы сторож до следующих суток — тогда честно говорим об этом.
+TO=""
+for c in timeout gtimeout; do command -v "$c" >/dev/null 2>&1 && { TO="$c"; break; }; done
+
+# Лок: джоба стоит на расписании, но её же запускают руками. Два наложившихся прогона
+# затирают STATE друг друга и могут отправить дубль.
+LOCK="$(dirname "$STATE")/watch.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  printf '[%s] пропуск: другой прогон держит лок\n' "$(date '+%Y-%m-%d %H:%M')" >> "$LOG"
+  exit 0
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$LOG"; }
 
 # ⚑ rc обвязки ОТДЕЛЬНО от числа находок. Раньше здесь стоял `|| true`, и любой сбой
@@ -40,7 +56,13 @@ log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$LOG"; }
 # давал пустой $OUT → grep -c = 0 → ветка «чисто» → СОСТОЯНИЕ ТРЕВОГИ ЗАТИРАЛОСЬ на `none`,
 # и реальная находка переставала считаться новой. Сторож, написанный против тихих отказов,
 # сам отказывал тихо. Нашла панель код-ревью, воспроизведено подменой $RJ на битый путь.
-OUT="$(cd "$RJ" && timeout 300 python3 bin/redjob doctor 2>&1)"; RC=$?
+if [ -n "$TO" ]; then
+  OUT="$(cd "$RJ" && "$TO" 300 python3 bin/redjob doctor 2>&1)"; RC=$?
+else
+  log "⚠ ни timeout, ни gtimeout не найдены — гоню doctor БЕЗ ограничения времени"
+  OUT="$(cd "$RJ" && python3 bin/redjob doctor 2>&1)"; RC=$?
+fi
+
 # doctor отдаёт ≠0 штатно, когда есть CRITICAL, поэтому rc сам по себе не приговор —
 # приговор в том, что вывод не похож на отчёт доктора.
 if [ "$RC" -ge 124 ] || ! printf '%s' "$OUT" | grep -q '^redjob doctor —'; then
@@ -58,7 +80,8 @@ N="$(printf '%s' "$OUT" | grep -c '^\[CRITICAL\]')" || N=0
 case "$N" in ''|*[!0-9]*) N=0 ;; esac
 
 if [ "${N:-0}" -eq 0 ]; then
-  printf 'none\t%s\n' "$(date +%s)" > "$STATE"
+  # ⚑ Атомарно: прямой `>` рвёт файл, если процесс умрёт посередине.
+  printf 'none\t%s\n' "$(date +%s)" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
   log "чисто (0 CRITICAL)"; exit 0
 fi
 
@@ -92,9 +115,11 @@ fi
 SEND="$(printf '%s' "$MSG" | sh -c "$REDJOB_NOTIFY_CMD" 2>/dev/null)"
 
 if [ "$SEND" = "SENT" ]; then
-  printf '%s\t%s\n' "$SIG" "$NOW" > "$STATE"
+  printf '%s\t%s\n' "$SIG" "$NOW" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
   log "$N CRITICAL → отправлено ($WHY)"
 else
   # состояние НЕ обновляем: не смогли позвать — попробуем в следующий раз, а не «отчитались»
   log "$N CRITICAL → ОТПРАВКА НЕ УДАЛАСЬ: ${SEND:-no-result} (состояние не сдвинуто, повтор завтра)"
+  # ⚑ Ненулевой выход: недоставленный алерт обязан быть виден снаружи.
+  exit 1
 fi
