@@ -527,6 +527,145 @@ def run():
         failures.append(f"vault-audit: launchd-chain (bad={len(_fs_bad)}, ok={len(_fs_ok)})")
         print("  ✗ vault-audit: launchd-chain")
 
+    # ── seed.ANNOTATIONS: дубль ключа — молчаливый пожиратель правок ────────────
+    # Пойман на живом парке: добавленная аннотация исчезла без следа,
+    # потому что ключ уже был ниже, а в словаре-литерале побеждает последний. Ни ошибки,
+    # ни предупреждения — ровно тот класс, против которого написан этот скилл.
+    import ast as _ast
+    _seedsrc = open(os.path.join(LIB, "seed.py"), encoding="utf-8").read()
+    _dups = []
+    for _node in _ast.walk(_ast.parse(_seedsrc)):
+        if isinstance(_node, _ast.Assign) and any(
+                getattr(t, "id", None) == "ANNOTATIONS" for t in _node.targets):
+            _keys = [k.value for k in _node.value.keys if isinstance(k, _ast.Constant)]
+            _dups = [k for k in set(_keys) if _keys.count(k) > 1]
+    if not _dups:
+        print("  ✓ seed               в ANNOTATIONS нет дублирующихся ключей")
+    else:
+        failures.append(f"seed: дубли ключей в ANNOTATIONS: {_dups}")
+        print(f"  ✗ seed: дубли ключей в ANNOTATIONS: {_dups}")
+
+    # ── logstall: два реальных дефекта, пойманных на живом парке 2026-08-21 ──────
+    import logstall as _ls, time as _t
+
+    def _mklog(d, name, lines, mtime=None):
+        fp = os.path.join(d, name)
+        with open(fp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        if mtime:
+            os.utime(fp, (mtime, mtime))
+        return fp
+
+    _now = 1_800_000_000.0
+    _d = _tf.mkdtemp()
+
+    # (1) Подпись из СЕРЕДИНЫ лога не должна выдаваться за «последнее слово».
+    # Живой случай: handshake-ошибка ×12 в строках 62–64 из 174,
+    # хвост — другие, единичные ошибки. Раньше → ложный CRITICAL.
+    _mid = (["fetch failed (кэш не тронут): <urlopen error handshake timed out>"] * 5
+            + ["ok: 1 events"] * 40
+            # хвост: ошибки ЕСТЬ, но каждая своя — в систему не складываются
+            + [f"[ERROR] сбой соединения FAILED к узлу node-{i}" for i in range(3)])
+    _p1 = _mklog(_d, "mid.err.log", _mid, _now - 3600)
+    _r1 = _ls.scan({"logs": {"err": _p1}}, now=_now)
+    if not any(sev == "CRITICAL" for sev, _m, _f in _r1):
+        print("  ✓ logstall          подпись из середины лога не идёт в CRITICAL")
+    else:
+        failures.append("logstall: середина лога выдана за хвост")
+        print("  ✗ logstall: середина лога выдана за хвост")
+
+    # (2) Ошибки в err при СВЕЖЕМ out = джоба выкарабкалась, не тревога.
+    _p2e = _mklog(_d, "rec.err.log", ["Traceback: boom"] * 4, _now - 7200)
+    _p2o = _mklog(_d, "rec.out.log", ["ok: 1 events"], _now - 600)
+    _r2 = _ls.scan({"logs": {"err": _p2e, "out": _p2o}}, now=_now)
+    if (not any(sev == "CRITICAL" for sev, _m, _f in _r2)
+            and any("выкарабкалась" in m for _s, m, _f in _r2)):
+        print("  ✓ logstall          свежий соседний лог снимает тревогу")
+    else:
+        failures.append(f"logstall: кросс-проверка потоков ({_r2})")
+        print("  ✗ logstall: кросс-проверка потоков")
+
+    # (3) Позитивный контроль: детектор обязан ЛОВИТЬ настоящий тихий отказ,
+    # иначе фиксы выше просто выключили бы его целиком.
+    _p3 = _mklog(_d, "stall.err.log",
+                 ["ok: старт"] + ["FileNotFoundError: 'op' — остаётся в pending, повтор через час"] * 5,
+                 _now - 3600)
+    _r3 = _ls.scan({"logs": {"err": _p3}}, now=_now)
+    if any(sev == "CRITICAL" for sev, _m, _f in _r3):
+        print("  ✓ logstall          настоящий тихий отказ по-прежнему CRITICAL")
+    else:
+        failures.append("logstall: позитивный контроль провален — отказ не пойман")
+        print("  ✗ logstall: позитивный контроль провален")
+
+    # (4) Окно времени: редкие транзиенты (даты размазаны на недели) ≠ заклинило.
+    # Живой случай: одна и та же ошибка 15.07/18.07/04.08/19.08
+    # при ЕЖЕДНЕВНОМ прогоне — пять сбоев за пять недель, детектор звал это отказом.
+    def _st(off_days):
+        return _t.strftime("%Y/%m/%d %H:%M:%S", _t.localtime(_now - off_days * 86400))
+
+    _sparse = [f"[ERROR] {_st(d)} error initializing client: Authentication: (failed to auth)"
+               for d in (35, 32, 17, 2)]
+    _p4 = _mklog(_d, "sparse.err.log", _sparse, _now - 2 * 86400)
+    _r4 = _ls.scan({"logs": {"err": _p4},
+                    "schedule": {"calendar": [{"hour": 9, "minute": 0}]}}, now=_now)
+    if not any(sev == "CRITICAL" for sev, _m, _f in _r4):
+        print("  ✓ logstall          редкие транзиенты за недели не идут в CRITICAL")
+    else:
+        failures.append(f"logstall: окно времени не применилось ({_r4})")
+        print("  ✗ logstall: окно времени не применилось")
+
+    # (5) Позитивный контроль окна: те же ДАТИРОВАННЫЕ ошибки, но подряд за час —
+    # это уже заклинило, и оно обязано остаться CRITICAL.
+    _dense = [f"[ERROR] {_t.strftime('%Y/%m/%d %H:%M:%S', _t.localtime(_now - m * 600))} "
+              f"error initializing client: Authentication: (failed to auth)"
+              for m in (5, 4, 3, 2, 1)]
+    _p5 = _mklog(_d, "dense.err.log", _dense, _now - 600)
+    _r5 = _ls.scan({"logs": {"err": _p5},
+                    "schedule": {"calendar": [{"hour": 9, "minute": 0}]}}, now=_now)
+    if any(sev == "CRITICAL" for sev, _m, _f in _r5):
+        print("  ✓ logstall          датированные ошибки подряд — по-прежнему CRITICAL")
+    else:
+        failures.append(f"logstall: окно съело настоящий отказ ({_r5})")
+        print("  ✗ logstall: окно съело настоящий отказ")
+
+    # (6) Тишина err-лога — НЕ сигнал: err пишется только при ошибках.
+    # Живой случай: err от 06.07, а собственный лог скрипта — успех вчерашним днём.
+    _p6 = _mklog(_d, "erronly.err.log", ["[ERROR] разовый сбой"], _now - 45 * 86400)
+    _r6 = _ls.scan({"logs": {"err": _p6}, "schedule": {"interval_sec": 86400}}, now=_now)
+    if not any("не пополнялся" in m for _s, m, _f in _r6):
+        print("  ✓ logstall          молчащий err-лог не считается тишиной")
+    else:
+        failures.append(f"logstall: err-лог принят за тишину ({_r6})")
+        print("  ✗ logstall: err-лог принят за тишину")
+
+    # (7) Позитивный контроль: замолчавший OUT-лог обязан остаться WARNING.
+    _p7 = _mklog(_d, "quiet.out.log", ["ok: работаю"], _now - 45 * 86400)
+    _r7 = _ls.scan({"logs": {"out": _p7}, "schedule": {"interval_sec": 86400}}, now=_now)
+    if any("не пополнялся" in m for _s, m, _f in _r7):
+        print("  ✓ logstall          замолчавший out-лог по-прежнему WARNING")
+    else:
+        failures.append(f"logstall: тишина out-лога больше не ловится ({_r7})")
+        print("  ✗ logstall: тишина out-лога больше не ловится")
+
+    # (8) Период календарных джоб — по самой редкой оси, а не по числу записей.
+    # Живые случаи: джоба «1-е и 15-е» считалась 12-часовой, недельная (Пн) — суточной,
+    # и обе объявлялись «замолчавшими» сразу после нормального прогона.
+    _cases = [
+        ({"calendar": [{"hour": 11, "minute": 37, "day": 1},
+                       {"hour": 11, "minute": 37, "day": 15}]}, 15 * 86400, "1-е и 15-е"),
+        ({"calendar": [{"hour": 10, "minute": 5, "weekday": 1}]}, 7 * 86400, "по понедельникам"),
+        ({"calendar": [{"hour": 9, "minute": 0}]}, 86400, "ежедневно"),
+    ]
+    _bad = [(w, _ls._period_sec({"schedule": sch}), exp)
+            for sch, exp, w in _cases if _ls._period_sec({"schedule": sch}) != exp]
+    if not _bad:
+        print("  ✓ logstall          период календарных джоб: месяц/неделя/сутки")
+    else:
+        failures.append(f"logstall: период посчитан неверно: {_bad}")
+        print(f"  ✗ logstall: период посчитан неверно: {_bad}")
+
+    _sh.rmtree(_d, ignore_errors=True)
+
     print()
     if failures:
         print(f"FAIL: {len(failures)} провалов")

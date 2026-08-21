@@ -48,6 +48,10 @@ def _norm_cal(entry):
         "hour": entry.get("Hour"),
         "minute": entry.get("Minute"),
         "weekday": wd,
+        # ⚑ Day (число месяца) раньше терялся, и месячная джоба выглядела ежедневной:
+        # «1-е и 15-е» давало период 12 ч, из-за чего доктор объявлял её замолчавшей
+        # через полтора суток после нормального прогона.
+        "day": entry.get("Day"),
     }
 
 
@@ -122,6 +126,8 @@ def schedule_human(model):
         parts = []
         for s in model.get("schedule", []):
             wd = _WD.get(s["weekday"], "*") if s.get("weekday") is not None else "*"
+            if s.get("day") is not None:
+                wd = f"{s['day']}-го"
             hh = "??" if s.get("hour") is None else f"{s['hour']:02d}"
             mm = "00" if s.get("minute") is None else f"{s['minute']:02d}"
             parts.append(f"{wd} {hh}:{mm}")

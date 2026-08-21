@@ -20,6 +20,7 @@ import common
 import plistparse
 import registry
 import scrub
+import logstall
 
 
 # ---------- модель находки ----------
@@ -149,6 +150,18 @@ def check_job(job, live, findings):
             if sz > 10 * 1024 * 1024:
                 findings.append(Finding("WARNING", "file-hygiene", label,
                                          f"{kind}-лог раздут: {sz // 1024 // 1024} МБ ({lp})"))
+
+    # --- 1б. РАНТАЙМ: тихий отказ с ретраем ---
+    # Статикой этот класс невидим: plist корректен, бинари на месте, триггер есть — а джоба
+    # падает каждый цикл и молчит. Читаем СОДЕРЖИМОЕ логов, а не только их размер.
+    try:
+        for sev, msg, fix in logstall.scan(job):
+            findings.append(Finding(sev, "log-stall", label, msg, fix))
+    except Exception as e:
+        # молча не глушим: тихая поломка детектора тихих поломок — худший из исходов
+        findings.append(Finding("WARNING", "log-stall", label,
+                                 f"проверка логов не выполнилась ({type(e).__name__}) — "
+                                 f"тихий отказ этим прогоном НЕ проверен"))
 
     # --- 2/4. PATH + missing bins через реальный резолв ---
     eff_path = build_env_path({"env_path": plist_env_path}, ctx)
