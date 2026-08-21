@@ -59,8 +59,21 @@ report() {
   echo "  ❌ $1"; sed 's/^/      /' "$2" | head -8; fail=1
 }
 
+# ── 0. Сквозной инвариант словаря вердиктов ───────────────────────────────
+# verdict-enum-test существует ради того, чтобы переименование вердикта не сломало
+# redwork/lib/autonomy-gate.sh (fail-closed по литералу "SHIP"). Без вызывающего это была
+# документация, а не защита — ровно класс дефекта «проверка молча пропускается».
+VET="$HOME/.claude/skills/plan-panel/lib/verdict-enum-test.sh"
+if [ -f "$VET" ]; then
+  if bash "$VET" >/dev/null 2>&1; then echo "  ✅ словарь вердиктов цел (verdict-enum-test)"
+  else echo "  ❌ verdict-enum-test FAILED — рассинхрон вердиктов, публиковать нельзя"; fail=1; fi
+else
+  # Отсутствие стража — САМО ПО СЕБЕ отчёт, а не тишина.
+  echo "  ⚠️  verdict-enum-test не найден ($VET) — инвариант вердиктов НЕ проверен"
+fi
+
 # ── 1. Приватные пути: не должны быть под git вообще ───────────────────────
-grep -E '(golden/aliases\.txt|redjob/jobs\.yaml|/roadmap/|/bridge/mac/state/|/tests/golden/live-)' "$LIST" > "$TMP/paths" 2>/dev/null
+grep -E '(^|/)(golden/aliases\.txt|redjob/jobs\.yaml|roadmap/|bridge/mac/state/|tests/golden/live-|baseline/)' "$LIST" > "$TMP/paths" 2>/dev/null
 report "приватные пути под git" "$TMP/paths"
 
 # ── 2. Контентные категории (ERE, без -P) ─────────────────────────────────

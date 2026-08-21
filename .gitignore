@@ -13,6 +13,7 @@ __pycache__/
 *.pyc
 
 # Приватные данные оператора — НИКОГДА не публикуем
+**/baseline/
 **/golden/aliases.txt
 **/docs/review/
 **/roadmap/
