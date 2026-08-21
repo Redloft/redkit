@@ -666,6 +666,32 @@ def run():
 
     _sh.rmtree(_d, ignore_errors=True)
 
+    # ── redjob-watch.sh: сбой запуска doctor ≠ «находок ноль» ───────────────────
+    # Пробел, названный панелью код-ревью 2026-08-21: восемь asserts покрывали logstall,
+    # а единственный новый shell-файл — где и жил critical — не покрыт ничем.
+    # Дефект: `|| true` глушил rc, grep -c по пустому выводу давал 0, скрипт писал «чисто»
+    # и ЗАТИРАЛ состояние тревоги, из-за чего реальная находка переставала быть «новой».
+    import subprocess as _sp
+    _wd = os.path.join(os.path.dirname(HERE), "bin", "redjob-watch.sh")
+    if not os.path.exists(_wd):
+        print("  · watch-скрипт отсутствует — проверка пропущена")
+    else:
+        _d = _tf.mkdtemp()
+        _st = os.path.join(_d, "state.txt")
+        open(_st, "w", encoding="utf-8").write("СТАРОЕ-СОСТОЯНИЕ\t1700000000\n")
+        _env = dict(os.environ, REDJOB_HOME=os.path.join(_d, "нет-такого-пути"),
+                    REDJOB_STATE=_st, REDJOB_LOG=os.path.join(_d, "w.log"))
+        _r = _sp.run(["bash", _wd], env=_env, capture_output=True, text=True, timeout=120)
+        _keep = open(_st, encoding="utf-8").read().startswith("СТАРОЕ-СОСТОЯНИЕ")
+        _logged = "СБОЙ ЗАПУСКА" in open(os.path.join(_d, "w.log"), encoding="utf-8").read()
+        if _r.returncode != 0 and _keep and _logged:
+            print("  ✓ redjob-watch      сбой запуска doctor: ненулевой выход, STATE цел")
+        else:
+            failures.append(f"redjob-watch: сбой doctor принят за «чисто» "
+                            f"(rc={_r.returncode}, state_kept={_keep}, logged={_logged})")
+            print("  ✗ redjob-watch: сбой doctor принят за «чисто»")
+        _sh.rmtree(_d, ignore_errors=True)
+
     print()
     if failures:
         print(f"FAIL: {len(failures)} провалов")

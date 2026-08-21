@@ -27,14 +27,27 @@ set -uo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 RJ="${REDJOB_HOME:-$HOME/.claude/skills/redjob}"
-STATE="$HOME/.cache/redjob/watch-state.txt"
-LOG="$HOME/.cache/redjob/watch.log"
+STATE_DEFAULT="$HOME/.cache/redjob/watch-state.txt"
+STATE="${REDJOB_STATE:-$STATE_DEFAULT}"
+LOG="${REDJOB_LOG:-$HOME/.cache/redjob/watch.log}"
 mkdir -p "$(dirname "$STATE")"
 REMIND_DAYS="${REDJOB_REMIND_DAYS:-7}"
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M')" "$*" >> "$LOG"; }
 
-OUT="$(cd "$RJ" && timeout 300 python3 bin/redjob doctor 2>&1)" || true
+# ⚑ rc обвязки ОТДЕЛЬНО от числа находок. Раньше здесь стоял `|| true`, и любой сбой
+# запуска (переехавший $RJ, нет python3 в PATH джобы, таймаут, трейсбек до первой строки)
+# давал пустой $OUT → grep -c = 0 → ветка «чисто» → СОСТОЯНИЕ ТРЕВОГИ ЗАТИРАЛОСЬ на `none`,
+# и реальная находка переставала считаться новой. Сторож, написанный против тихих отказов,
+# сам отказывал тихо. Нашла панель код-ревью, воспроизведено подменой $RJ на битый путь.
+OUT="$(cd "$RJ" && timeout 300 python3 bin/redjob doctor 2>&1)"; RC=$?
+# doctor отдаёт ≠0 штатно, когда есть CRITICAL, поэтому rc сам по себе не приговор —
+# приговор в том, что вывод не похож на отчёт доктора.
+if [ "$RC" -ge 124 ] || ! printf '%s' "$OUT" | grep -q '^redjob doctor —'; then
+  log "СБОЙ ЗАПУСКА doctor (rc=$RC): вывод не похож на отчёт. STATE не трогаю."
+  printf '%s' "$OUT" | tail -5 >> "$LOG"
+  exit 1     # ненулевой выход виден в launchctl list и ловится правилом exit-code
+fi
 CRIT="$(printf '%s' "$OUT" | grep -A1 '^\[CRITICAL\]' || true)"
 # подпись набора: только «правило · метка», без изменчивых чисел (часы, счётчики повторов),
 # иначе набор «менялся» бы каждый прогон и анти-спам не работал
@@ -70,7 +83,10 @@ if [ -z "${REDJOB_NOTIFY_CMD:-}" ]; then
   # Молча не глотаем: без канала сторож не сторож, и это должно быть видно в логе.
   log "$N CRITICAL, но REDJOB_NOTIFY_CMD не задан — отправить некуда (состояние не сдвинуто)"
   printf '%s\n' "$MSG"
-  exit 0
+  # ⚑ Ненулевой выход, а не 0: сторож без канала НЕ работает, и это должно быть видно
+  # в `launchctl list` (и пойматься правилом exit-code), а не только в логе, который
+  # по определению никто не читает. Канал — обязательный шаг установки, см. SKILL.md.
+  exit 1
 fi
 
 SEND="$(printf '%s' "$MSG" | sh -c "$REDJOB_NOTIFY_CMD" 2>/dev/null)"
