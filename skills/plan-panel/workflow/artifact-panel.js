@@ -176,6 +176,62 @@ if (selected.length < 2) {
   log(`⚠ scoper выбрал ${selected.length} роль(и) — добираю по жанру '${scope.artifact_kind}': ${add.join(', ')}`)
   selected = selected.concat(add).slice(0, 4)
 }
+// PREFLIGHT РОСТЕРА (2026-08-25). Состав выбирает scoper мягкими правилами, и роли без
+// обязательного триггера систематически не активируются: в ledger'е «legal-ru не активирован»
+// ×2 и «unit-economics не активирован» ×1, причём судья констатировал пропуск ПОСЛЕ того, как
+// все роли отработали без этой линзы — то есть панель уже прошла мимо.
+// Почему машинно, а не пунктом в промпте scoper'а: доктрина этого же кода — прозаический
+// контракт систематически пропускают (внешние судьи выпали на 3 недели, fact-grounder
+// отработал 1 раз из 135), поэтому такие вещи форсируют данными. Аналог — floor-globs
+// в redwork/risk-classify: неотключаемы, и это их смысл.
+// Триггеры лексические, значит ложные срабатывания будут: обзор рынка со словом «налог»
+// притащит legal-ru. Это осознанный перекос — цена ошибок асимметрична: лишняя роль стоит
+// одного прогона и шум гасит судья, пропущенная юридическая линза на КП с обязательствами
+// стоит отправленного клиенту документа. Порог занижаем в сторону включения.
+// ⚠ НИКАКИХ \w И \b В КИРИЛЛИЧЕСКИХ АЛЬТЕРНАТИВАХ. В JS `\w` == [A-Za-z0-9_], поэтому
+// `персональн\w*\s+данн` не матчит «персональные данные» ВООБЩЕ, а `\b` после кириллицы
+// ложен («10% от оборота» мимо). Первая версия таблицы была мертва в четырёх альтернативах
+// из пяти, и тесты этого не видели: фикстура срабатывала по СОСЕДНЕЙ альтернативе.
+// Отсюда правило ниже: на каждую альтернативу — свой минимальный позитивный пример.
+const CYR = '[а-яёА-ЯЁ]'
+// NB — «не внутри слова» слева. Нужен КОРОТКИМ основам, которые поглощаются обычными словами:
+// «налог» ⊂ аНАЛОГ/аналогичный/аналоговый, «усн» ⊂ вкУСНый/искУСНый, «cac» ⊂ CAChe/CACao.
+// Без него гейт не «перекошен в сторону включения», а включён ВСЕГДА: «аналоги» и «cache»
+// встречаются едва ли не в каждой концепции и деке. Длинные основы (договор, оферт, неустойк)
+// в поглощение не попадают и границы не требуют. \b тут не годится — на кириллице он ложен.
+const NB = '(?<![а-яёa-z])'
+const ROSTER_PREFLIGHT = [
+  { role: 'legal-ru', why: 'обязательства сторон / деньги между сторонами / персональные данные',
+    re: new RegExp('(договор|оферт|обязательств|неустойк|штраф|ответственност[ьи]\\s+сторон|комисси|вознагражд'
+      + '|роялти|' + NB + 'налог|' + NB + 'ндс(?!' + CYR + ')|' + NB + 'усн(?!' + CYR + ')'
+      + '|самозанят|персональн' + CYR + '*\\s+данн|согласи' + CYR + '*\\s+на\\s+обработк|152-ФЗ)', 'i') },
+  { role: 'unit-economics', why: 'переменная выплата / тариф / окупаемость',
+    re: new RegExp('(комисси|вознагражд|%\\s*от(?!' + CYR + ')|процент' + CYR + '*\\s+от(?!' + CYR + ')'
+      + '|тариф|подписк|абонентск|окупаем|маржинальн|юнит-экономик'
+      + '|' + NB + 'ltv(?![a-z])|' + NB + 'cac(?![a-z]))', 'i') },
+]
+
+// Отдельной функцией — чтобы гард мог прогнать её без агентов (тот же приём, что ceiling-test).
+function applyRosterPreflight(selected, text, available, table) {
+  const forced = []
+  for (const pf of table) {
+    if (!available.includes(pf.role)) continue      // роли нет в ростере — не выдумываем состав
+    if (selected.includes(pf.role)) continue        // scoper уже взял — preflight молчит
+    if (!pf.re.test(text || '')) continue
+    selected.push(pf.role)
+    forced.push(pf)
+  }
+  return { selected, forced }
+}
+
+// ⚠ ПОСЛЕ добора-до-двух и ПОСЛЕ slice(0,4): форсированную роль обрезать лимитом нельзя —
+// иначе гейт снимается ровно тем механизмом, от которого защищает.
+const pre = applyRosterPreflight(selected, artifactText, reviewRoleNames, ROSTER_PREFLIGHT)
+selected = pre.selected
+for (const f of pre.forced) {
+  log(`⚑ preflight ростера: добавлена роль ${f.role} — в тексте есть ${f.why}, scoper её не выбрал`)
+}
+
 log(`Жанр: ${scope.artifact_kind} · адресат: ${scope.recipient} · цель: ${scope.goal} · роли: ${selected.join(', ')}`)
 if (scope.needs_research) log('⚠ scoper: ролям не хватает внешних фактов — стоило дёрнуть /research до панели')
 
@@ -275,6 +331,10 @@ const learningsEntry = {
   ts: timestamp, skill: 'artifact-panel', run_id: runId,
   telemetry_ok: telemetryOk, entry_point: entryPoint,
   artifact_kind: scope.artifact_kind,
+  // Форсы дублируем в ledger, а не только в per-run metadata.json: тот живёт под retention
+  // +90d с ленивым GC и ничем не агрегируется, то есть «измеримость» перекоса была на словах.
+  // В ledger'е они переживут прогон и попадут в ту же выборку, что телеметрия и остаток.
+  forced_roles: pre.forced.map(f => f.role),
   verdict: judge.verdict,
   confidence: judge.confidence,
   remainder_class: judge.remainder_class || null,
@@ -332,7 +392,12 @@ return {
     'metadata.json': JSON.stringify({
       run_id: runId, timestamp, run_type: 'artifact', artifact_name: artifactName,
       artifact_kind: scope.artifact_kind, recipient: scope.recipient, goal: scope.goal,
-      selected_roles: selected, verdict: judge.verdict, remainder_class: judge.remainder_class,
+      selected_roles: selected,
+      // Форсированные роли пишем отдельно: гейт сознательно перекошен в сторону включения,
+      // значит частоту его ложных срабатываний надо чем-то мерить — иначе снять или сузить
+      // триггеры будет не на основании чего.
+      forced_roles: pre.forced.map(f => f.role),
+      verdict: judge.verdict, remainder_class: judge.remainder_class,
       telemetry_ok: telemetryOk, entry_point: entryPoint,
     }, null, 2),
   },

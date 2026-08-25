@@ -250,6 +250,11 @@ quarantine() {
   local canon; canon="$(_canon_path "$root")"
   [ -f "$L" ] || { echo '{"since":null,"historical":0,"fresh":[]}'; return 0; }
   local map; map="$(_canon_map "$canon")" || { echo '{"since":null,"historical":0,"fresh":[],"canon":"absent-or-broken"}'; return 0; }
+  # ⚠ ГОРИЗОНТ КАРАНТИНА == .updated, И ЭТО ЛОВУШКА: бампнул дату — неразобранные кандидаты
+  # ушли в «исторические» и больше не видны поимённо. Разводить поля пробовали (.since отдельно)
+  # — стало хуже: на .fresh висят ещё три потребителя (solidify orphans, solidify scan, нудж),
+  # которые рассчитывают, что промоут очищает очередь. Поэтому правило ПРОЦЕССНОЕ, не кодовое:
+  # двигать .updated ТОЛЬКО после разбора очереди (записано в commands/panel-solidify.md).
   local since; since="$(jq -r '.updated // "1970-01-01"' "$canon" 2>/dev/null || echo '1970-01-01')"
   jq -s --argjson map "$map" --arg since "$since" '
     def isdate: (type == "string") and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}");
@@ -278,17 +283,27 @@ health() {
   local recs; recs="$(tail -n "$W" "$L" | jq -s 'length')"
   local finds; finds="$(tail -n "$W" "$L" | jq -s '[.[].methodology_findings[]? | select(type=="object")] | length')"
   local hot; hot="$(cluster "$root" | jq --argjson t "${PLAN_PANEL_SOLIDIFY_THRESHOLD:-3}" '[.[]|select(.count>=$t)]|length')"
-  local qfresh; qfresh="$(quarantine "$root" | jq '[.fresh[]?]|length' 2>/dev/null || echo 0)"
+  local qjson; qjson="$(quarantine "$root" 2>/dev/null || echo '{}')"
+  local qfresh; qfresh="$(printf '%s' "$qjson" | jq '[.fresh[]?]|length' 2>/dev/null || echo 0)"
+  [ -n "${qfresh// }" ] || qfresh=0
   local warn=""
   # (а) критик перестал выдавать находки — исходный класс «тихо»
   if [ "$recs" -ge 10 ] && [ "$finds" -eq 0 ]; then
     warn="${warn}\n  ⚑ ПЕТЛЯ МОЛЧИТ: за последние $recs прогонов НИ ОДНОЙ methodology-находки — проверь мета-критика"
   fi
-  # (б) канон отстал: критик пишет ключи, которых в словаре нет → всё оседает в карантине
-  if [ "$finds" -ge 10 ] && [ "$qfresh" -gt 0 ]; then
-    local share; share=$(( qfresh * 100 / finds ))
-    [ "$share" -ge 50 ] && warn="${warn}\n  ⚑ КАНОН ОТСТАЁТ: ${share}% свежих находок не резолвятся в словарь ($qfresh из $finds) — пора промоутить кандидатов"
-  fi
+  # (б)/(д) УДАЛЕНЫ 2026-08-25 после трёх кругов панели (8 critical, все — в их гейтах).
+  #     (б) делил пожизненный qfresh на оконный finds → «266% (80 из 30)».
+  #     (д) пытался мерить «словарь отстаёт» тревогой и трижды ломался об одно и то же:
+  #       · гейт `hot -eq 0` делал сторож НЕМЫМ там, где есть незакрытая тема (finalize: hot=1
+  #         при 22 кандидатах) — отключённость неотличима от тишины;
+  #       · newmax фильтровал группы по дате, а брал ПОЖИЗНЕННЫЙ .count — тот же unit-mismatch,
+  #         за который удалили (б);
+  #       · маркер обслуживания жил в canon.json, а lenses/ у finalize — СИМЛИНК на наш:
+  #         один файл на два контура с разными очередями, погасить по-контурно нечем.
+  #     ВЫВОД: «есть неразобранный backlog» — СОСТОЯНИЕ, а не событие. Состояние не гасится
+  #     само и потому даёт тревогу, которую нечем выключить (экономика ложных тревог).
+  #     Состояние показываем НЕЙТРАЛЬНОЙ строкой в сводке ниже; тревогу оставляем событию —
+  #     «кандидат встретился второй раз», её уже печатает solidify-nudge.sh по .fresh count>=2.
   # (в) шаг внешних судей молча выпадает (2026-08-19). Тумблеры включены, а вызовов нет —
   #     ровно то, что случилось между 22.07 и 19.08: 85 прогонов панели, 0 записей судей.
   #     Прозаический контракт в SKILL.md это не ловит, поэтому детектируем данными.
@@ -326,6 +341,12 @@ health() {
       warn="${warn}\n  ⚑ РЕСЁРЧ НЕ ЗОВУТ: последний вызов fact-grounder ${last_fg:-никогда} раньше последнего прогона $last_run_r — шаг пропускают (планы уходят к ролям без свежих веб-фактов)"
     fi
   fi
+  # Состояние («сколько кандидатов, с какого горизонта») НЕ дублируем здесь: его уже печатает
+  # stat() строкой «канон линз: N тем · карантин — свежих X, исторических Y (до DATE)», и
+  # именно stat() выводит solidify.sh scan, который гоняет /panel-solidify. Строка в health
+  # была бы вычислена и выброшена: единственный автоматический вызыватель health — Stop-хук,
+  # а он берёт только строки с ⚑. Плюс подпись «последний промоут» была бы ложью — .updated
+  # это ГОРИЗОНТ, и по процессному правилу его не двигают до разбора очереди.
   echo "окно $recs прогонов: находок $finds · горячих тем $hot · свежих в карантине $qfresh"
   [ -n "$warn" ] && printf '%b\n' "$warn"
   return 0
@@ -334,7 +355,9 @@ health() {
 stat() {
   local root="${1:?skill_root}"; local L; L="$(_ledger_path "$root")"
   [ -f "$L" ] || { echo "ledger пуст (нет $L)"; return 0; }
-  local n; n="$(wc -l < "$L" | tr -d ' ')"
+  # ⚠ jq -s 'length', а НЕ wc -l: на файле без завершающего перевода строки wc теряет строку,
+  # и «долг $bad_all из $n» мог напечатать долг больше общего числа прогонов.
+  local n; n="$(jq -s 'length' "$L")"
   local mf; mf="$(jq -s '[.[].methodology_findings[]?] | map(select(type == "object")) | length' "$L")"
   echo "ledger: $n прогонов, $mf methodology-находок"
   # Битые находки (строка вместо объекта) — не молчим: до 2026-07-27 одна такая запись
@@ -344,19 +367,46 @@ stat() {
   echo "вердикты: $(jq -rs 'group_by(.verdict)|map("\(.[0].verdict):\(length)")|join(", ")' "$L")"
   # Телеметрия: чем меньше «сломано», тем осмысленнее вся остальная статистика.
   # Разбивка по entry_point — иначе непонятно, КАКОЙ из caller'ов течёт.
-  local bad; bad="$(jq -s '[.[] | select(.telemetry_ok == false or (.run_id // "" | test("REDACTED|^unknown-run-id")))] | length' "$L")"
+  # ⚠ СЧИТАЕМ В ОКНЕ, не пожизненно (2026-08-25). Пожизненный агрегат превращает УЖЕ закрытый
+  # долг в вечную тревогу: после починки на записи (19.08) все свежие прогоны чистые, но строка
+  # «⚑ сломана 67 из 115» печаталась бы до конца жизни ledger'а. Тревога, которая не может
+  # погаснуть, обесценивает весь отчёт — её перестают читать вместе с настоящими.
+  # Исторический долг показываем, но НЕЙТРАЛЬНО: это память, а не сигнал к действию.
+  local BADQ='[.[] | select(.telemetry_ok == false or (.run_id // "" | test("REDACTED|^unknown-run-id")))]'
+  # Свой тумблер, а не HEALTH_WINDOW: одна переменная на два разных отчёта означала бы, что
+  # сужение окна здоровья молча перекраивает картину телеметрического долга. Дефолт общий.
+  local SW="${PLAN_PANEL_STAT_WINDOW:-${PLAN_PANEL_HEALTH_WINDOW:-30}}"
+  local nwin; nwin="$(tail -n "$SW" "$L" | jq -s 'length')"
+  local bad; bad="$(tail -n "$SW" "$L" | jq -s "$BADQ | length")"
+  local bad_all; bad_all="$(jq -s "$BADQ | length" "$L")"
   if [ "$bad" != "0" ]; then
-    echo "⚑ телеметрия сломана: $bad из $n (нет/затёрт run_id или telemetry_ok=false)"
-    echo "  по entry_point: $(jq -rs '
-      [.[] | select(.telemetry_ok == false or (.run_id // "" | test("REDACTED|^unknown-run-id")))]
+    echo "⚑ телеметрия сломана: $bad из $nwin в окне (нет/затёрт run_id или telemetry_ok=false)"
+    echo "  по entry_point: $(tail -n "$SW" "$L" | jq -rs "$BADQ"'
       | group_by(.entry_point // "не указан")
-      | map("\(.[0].entry_point // "не указан"):\(length)") | join(", ")' "$L")"
+      | map("\(.[0].entry_point // "не указан"):\(length)") | join(", ")')"
   else
-    echo "телеметрия: чисто ($n/$n с валидным run_id)"
+    echo "телеметрия: в окне чисто ($nwin/$nwin с валидным run_id)"
+  fi
+  # Исторический долг — БЕЗУСЛОВНО, а не в elif: разбор инцидента ровно тот момент, когда
+  # «1 из 30 в окне» на фоне «5 из 36 пожизненно» читается иначе, чем без второй половины.
+  # Строка нейтральная (без ⚑): это память, а не сигнал к действию.
+  if [ "$bad_all" != "0" ] && [ "$bad_all" != "$bad" ]; then
+    echo "  исторический долг телеметрии: $bad_all из $n пожизненно — до починки на записи, действий не требует"
   fi
   # Ф4: ось остатка. Рост доли implementation/none = архитектурные дыры перестали
   # доживать до вердикта, то есть панель реально стала лучше. Это единственная метрика
   # качества, которую можно снять с ledger'а — verdict почти всегда NEEDS-WORK.
+  # Читатель forced_roles. ⚠ ЗНАМЕНАТЕЛЬ — окно И ТОЛЬКО артефактные прогоны: forced_roles
+  # пишет лишь artifact-panel, а в ledger'е рядом лежат сотни прогонов кодовой панели и
+  # finalize. Делить на них — тот же unit-mismatch, за который в этом диффе удалён пункт (б):
+  # на 116 прогонов артефактных всего 2, и порог «>50%» был бы структурно недостижим.
+  # Порог, названный ЗАРАНЕЕ: устойчиво >50% АРТЕФАКТНЫХ прогонов с форсами → триггеры шумные.
+  local afr atot
+  atot="$(tail -n "$SW" "$L" | jq -s '[.[] | select(.skill == "artifact-panel")] | length' 2>/dev/null || echo 0)"
+  afr="$(tail -n "$SW" "$L" | jq -s '[.[] | select(.skill == "artifact-panel") | select((.forced_roles // []) | length > 0)] | length' 2>/dev/null || echo 0)"
+  if [ "${atot:-0}" != "0" ]; then
+    echo "preflight ростера: форсы в ${afr:-0} из $atot артефактных прогонов в окне · $(tail -n "$SW" "$L" | jq -rs '[.[] | select(.skill == "artifact-panel") | .forced_roles // [] | .[]] | if length == 0 then "форсов нет" else (group_by(.) | map("\(.[0]):\(length)") | join(", ")) end' 2>/dev/null)"
+  fi
   local rc; rc="$(jq -rs '[.[] | .remainder_class // empty] | if length == 0 then "нет данных" else (group_by(.) | map("\(.[0]):\(length)") | join(", ")) end' "$L")"
   echo "остаток (remainder_class): $rc"
   local nc; nc="$(closures "$root" | jq 'length' 2>/dev/null || echo 0)"
@@ -558,6 +608,56 @@ CANON
   ! FG_HOME="$FGT/fg" FG_LEDGER="$FGT/fg/ledger.jsonl" health "$FGT" | grep -q 'РЕСЁРЧ НЕ ЗОВУТ'
   ok $? "ресёрч: tier=none засчитывается как вызов"
   rm -rf "$FGT"
+
+  # 18. Состояние очереди кандидатов ДОСТАВЛЯЕТСЯ (2026-08-25, после четырёх кругов панели).
+  #     Детектор-тревога удалён. Замена — НЕ новая строка в health (её единственный
+  #     автоматический вызыватель, Stop-хук, берёт только ⚑, и такая строка вычислялась бы
+  #     и выбрасывалась), а УЖЕ существующая строка stat(): её печатает solidify.sh scan,
+  #     то есть каждый /panel-solidify. Проверяем именно доставляемый путь.
+  local MT="$T/mat"; rm -rf "$MT"; mkdir -p "$MT/feedback" "$MT/lenses"
+  printf '{"version":1,"updated":"2026-07-01","lenses":[{"key":"kk","role":"qa","title":"t","aliases":[]}]}\n' > "$MT/lenses/canon.json"
+  : > "$MT/feedback/learnings.jsonl"
+  for i in $(seq 1 12); do
+    printf '{"ts":"2026-08-%02d","skill":"x","run_id":"m%s","entry_point":"finalize","methodology_findings":[{"role":"qa","severity":"warning","lens_key":"new:uniq-%s","observation":"o","proposed_checklist_delta":"d"}]}\n' "$i" "$i" "$i" >> "$MT/feedback/learnings.jsonl"
+  done
+  local so18; so18="$(stat "$MT")"
+  printf '%s' "$so18" | grep -q 'карантин — свежих 12'
+  ok $? "состояние: число кандидатов видно в stat (её печатает scan → /panel-solidify)"
+  printf '%s' "$so18" | grep -q 'до 2026-07-01'
+  ok $? "состояние: горизонт карантина подписан как горизонт, а не как «последний промоут»"
+  local ho18; ho18="$(health "$MT")"
+  ! printf '%s' "$ho18" | grep -q 'промоут'
+  ok $? "состояние: health НЕ дублирует состояние (строка выбрасывалась бы Stop-хуком)"
+  rm -rf "$MT"
+
+  # 19. Окно телеметрии в stat (2026-08-25). Пожизненный агрегат делал из закрытого долга
+  #     вечную тревогу; окно обязано гасить историю и ловить СВЕЖУЮ поломку.
+  local ST="$T/stat"; mkdir -p "$ST/feedback"
+  : > "$ST/feedback/learnings.jsonl"
+  # 5 старых сломанных + 30 свежих чистых → в окне чисто, долг показан нейтрально
+  for i in $(seq 1 5); do
+    printf '{"ts":"2026-07-0%s","skill":"x","run_id":"unknown-run-id","telemetry_ok":false}\n' "$i"
+  done >> "$ST/feedback/learnings.jsonl"
+  for i in $(seq 1 30); do
+    printf '{"ts":"2026-08-%02d","skill":"x","run_id":"ok-%s","entry_point":"finalize","telemetry_ok":true}\n' "$i" "$i"
+  done >> "$ST/feedback/learnings.jsonl"
+  # ⚠ НЕ `stat | grep -q`: при set -o pipefail grep -q выходит по первому совпадению,
+  #   stat получает SIGPIPE (141), и pipefail роняет конвейер — позитивный кейс падает
+  #   «ни за что» (совпадение не на последней строке). Захватываем вывод в переменную.
+  local so; so="$(stat "$ST")"
+  ! printf '%s' "$so" | grep -q '⚑ телеметрия сломана'
+  ok $? "телеметрия: старый долг вне окна → тревоги нет"
+  printf '%s' "$so" | grep -q 'исторический долг телеметрии: 5'
+  ok $? "телеметрия: исторический долг показан нейтрально (не потерян)"
+  # свежая поломка внутри окна → тревога обязана вернуться
+  printf '{"ts":"2026-08-31","skill":"x","run_id":"unknown-run-id","telemetry_ok":false}\n' >> "$ST/feedback/learnings.jsonl"
+  so="$(stat "$ST")"
+  printf '%s' "$so" | grep -q '⚑ телеметрия сломана'
+  ok $? "телеметрия: свежая поломка в окне → тревога вернулась"
+  # И долг ОСТАЁТСЯ виден рядом с тревогой — раньше elif его прятал ровно при разборе инцидента
+  printf '%s' "$so" | grep -q 'исторический долг телеметрии: 6'
+  ok $? "телеметрия: при свежей поломке исторический долг НЕ исчезает"
+  rm -rf "$ST"
 
   # 11. Третье состояние: канон есть, но битый → fail-open к до-Ф1, а не пустота.
   echo '{ это не json' > "$C2/lenses/canon.json"

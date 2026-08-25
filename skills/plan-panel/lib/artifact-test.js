@@ -91,5 +91,109 @@ ok(/Не выдавать `SHIP`/.test(judgeSrc) || /⛔/.test(judgeSrc),
 ok(/READY/.test(judgeSrc) && /RETHINK/.test(judgeSrc), 'judge-artifact.md описывает свой словарь')
 ok(/remainder_class/.test(judgeSrc), 'judge-artifact.md требует remainder_class')
 
+// ── 5. Preflight ростера (2026-08-25) ────────────────────────────────────────
+// Форсирует роли, которые scoper систематически не выбирает (legal-ru ×2, unit-economics ×1
+// в ledger'е). Извлекаем РЕАЛЬНУЮ функцию и таблицу из workflow — чтобы гард не разошёлся
+// с кодом (тот же приём, что ceiling-test.js: workflow-скрипты не экспортируемы).
+const pfFn = (wf.match(/function applyRosterPreflight[\s\S]*?\n\}/m) || [])[0]
+const pfTbl = (wf.match(/const CYR = [\s\S]*?\n\]/m) || [])[0]
+ok(!!pfFn, 'preflight: функция applyRosterPreflight найдена в workflow')
+ok(!!pfTbl, 'preflight: таблица ROSTER_PREFLIGHT найдена в workflow')
+if (pfFn && pfTbl) {
+  // eslint-disable-next-line no-eval
+  const { applyRosterPreflight, ROSTER_PREFLIGHT } =
+    eval(`(function(){ ${pfTbl}\n${pfFn}\n return { applyRosterPreflight, ROSTER_PREFLIGHT } })()`)
+  const ALL = reviewRoles.map(r => r.name)
+  const run = (sel, text) => applyRosterPreflight(sel.slice(), text, ALL, ROSTER_PREFLIGHT)
+
+  // ⚠ ПО ОДНОЙ АЛЬТЕРНАТИВЕ ЗА РАЗ. Первая версия таблицы была мертва в 4 альтернативах из 5
+  // (`\w`/`\b` в JS — ASCII, кириллицу не берут), и один сводный пример этого НЕ увидел:
+  // он срабатывал по соседней альтернативе. Минимальный пример на каждую — единственный
+  // способ поймать такой дрейф; без него гейт «работает» ровно до первого реального КП.
+  const LEGAL_CASES = [
+    ['договор', 'предмет договора'], ['оферт', 'публичная оферта'], ['обязательств', 'обязательства сторон'],
+    ['неустойк', 'неустойка 0,1%'], ['штраф', 'штраф за просрочку'], ['ответственность сторон', 'ответственность сторон'],
+    ['комисси', 'комиссия агента'], ['вознагражд', 'вознаграждение партнёра'], ['роялти', 'роялти правообладателю'],
+    ['налог', 'налоги платит исполнитель'], ['НДС', 'цена без НДС'], ['УСН', 'исполнитель на УСН'],
+    ['самозанят', 'подрядчик самозанятый'], ['персональные данные', 'персональные данные клиента'],
+    ['согласие на обработку', 'согласие на обработку данных'], ['152-ФЗ', 'требования 152-ФЗ'],
+  ]
+  for (const [name, text] of LEGAL_CASES) {
+    ok(run(['editor-ru'], text).selected.includes('legal-ru'), `preflight/legal-ru: ловит «${name}»`)
+  }
+  const UE_CASES = [
+    ['комисси', 'комиссия 10'], ['вознагражд', 'вознаграждение за приведённого клиента'],
+    ['% от', 'ставка 10% от оборота'], ['процент от', 'выплата: процент от выручки'],
+    ['тариф', 'тарифная сетка'], ['подписк', 'подписка помесячно'], ['абонентск', 'абонентская плата'],
+    ['окупаем', 'окупаемость за 8 месяцев'], ['маржинальн', 'маржинальность канала'],
+    ['юнит-экономик', 'юнит-экономика сходится'], ['LTV', 'LTV выше CAC'],
+  ]
+  for (const [name, text] of UE_CASES) {
+    ok(run(['editor-ru'], text).selected.includes('unit-economics'), `preflight/unit-economics: ловит «${name}»`)
+  }
+  // ⚠ НЕГАТИВЫ — ЗЕРКАЛО позитивной дисциплины, и без них гейт был «включён всегда».
+  // Найдено панелью на 4-м круге: у legal-ru негативных примеров не было НИ ОДНОГО, и
+  // «вкусный кофе» форсил юридическую роль («усн» ⊂ вкУСНый), а «аналоги» — «налог».
+  // На каждую КОРОТКУЮ основу, поглощаемую обычным словом, — свой негативный пример.
+  const LEGAL_NEG = ['аналоги на рынке: три компании', 'аналогичный подход уже применяли',
+    'аналоговый сигнал с датчика', 'вкусный кофе и свежая выпечка', 'искусный мастер по дереву']
+  for (const text of LEGAL_NEG) {
+    ok(!run([], text).selected.includes('legal-ru'), `preflight/legal-ru: НЕ срабатывает на «${text}»`)
+  }
+  const UE_NEG = ['система отопления в цеху', 'процентный отчёт за квартал', 'фотоотчёт с объекта',
+    'чистим cache перед деплоем', 'cacao и молоко на завтрак']
+  for (const text of UE_NEG) {
+    ok(!run([], text).selected.includes('unit-economics'), `preflight/unit-economics: НЕ срабатывает на «${text}»`)
+  }
+
+  const offer = 'КП: вознаграждение партнёра — комиссия 10% от суммы договора, налоги на стороне исполнителя'
+  let r = run(['editor-ru', 'client-advocate'], offer)
+  ok(r.forced.length === 2, 'preflight: обе роли отмечены как форсированные (видно в логе)')
+
+  // Без триггеров состав не раздувается — иначе панель зашумит на любом тексте.
+  r = run(['editor-ru'], 'Инструкция по загрузке фотографий в общую папку. Шаг 1: открой Диск.')
+  ok(r.forced.length === 0 && r.selected.length === 1, 'preflight: нет триггеров → состав не тронут')
+
+  // scoper уже взял роль — preflight не дублирует.
+  r = run(['legal-ru'], offer)
+  ok(r.selected.filter(x => x === 'legal-ru').length === 1, 'preflight: роль не дублируется')
+
+  // Роли нет в ростере — состав не выдумывается (fail-safe, как unknown-фильтр выше).
+  r = applyRosterPreflight(['editor-ru'], offer, ['editor-ru'], ROSTER_PREFLIGHT)
+  ok(r.selected.length === 1, 'preflight: роли вне ростера не добавляются')
+
+  // ОСОЗНАННОЕ РЕШЕНИЕ: preflight игнорирует kinds-фильтр жанра, в отличие от соседней ветки
+  // добора-до-двух. Обязательство сторон в тексте важнее того, каким жанром его назвал scoper;
+  // жанр — суждение модели, триггер — факт текста. Фиксируем тестом, чтобы это не «поправили».
+  ok(ROSTER_PREFLIGHT.every(pf => !('kinds' in pf)), 'preflight: жанр НЕ учитывается (осознанно)')
+
+  // ГЛАВНЫЙ КЕЙС: форс-роль обязана пережить срез состава.
+  r = run(['editor-ru', 'client-advocate', 'product-critic', 'business-analyst'], offer)
+  ok(r.selected.length > 4 && r.selected.includes('legal-ru'),
+     'preflight: форс-роль переживает срез 4 (добавляется ПОСЛЕ него)')
+  // ⚠ Якорь — строка ВЫЗОВА, не объявления функции. Раньше здесь стоял indexOf('applyRosterPreflight(selected'),
+  // который находил `function applyRosterPreflight(selected, …)` (offset 9885) вместо вызова (10462):
+  // гард был зелёным случайно и перенос ВЫЗОВА выше среза он бы не поймал.
+  const iSlice = wf.indexOf('slice(0, 4)')
+  const iCall = wf.indexOf('const pre = applyRosterPreflight(')
+  ok(iSlice > 0 && iCall > 0 && iSlice < iCall,
+     'preflight: ВЫЗОВ стоит ПОСЛЕ среза slice(0,4) в самом workflow')
+}
+
+// ── 6. Канон линз: .updated — И маркер промоута, И горизонт карантина ──────────
+// Разводить их пробовали (.since отдельно) и откатили: на quarantine().fresh висят ещё три
+// потребителя, которые рассчитывают, что промоут очищает очередь. Правило процессное —
+// двигать .updated только после разбора очереди (commands/panel-solidify.md).
+const canonPath = path.join(ROOT, 'lenses', 'canon.json')
+if (fs.existsSync(canonPath)) {
+  const canon = JSON.parse(fs.readFileSync(canonPath, 'utf8'))
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(canon.updated || ''), 'канон: .updated — дата в ISO (горизонт карантина)')
+  ok(!('since' in canon), 'канон: .since НЕ вернулся (разведение полей откачено осознанно)')
+}
+
+// ⚠ ГАРД ДЕРЖАТЬ ПОСЛЕДНИМ, ниже ВСЕХ секций (2026-08-25). Он тут был и раньше, но новый блок
+// проверок вписали ВЫШЕ него — и секция 5 оказалась за точкой выхода: её ✗ считались в fail,
+// а процесс к тому моменту уже завершался с 0, и test-foundation видел зелёное. Добавляешь
+// секцию — добавляй строго перед этой строкой, иначе тесты станут декорацией молча.
 if (fail) { console.error(`\n✗ artifact-test: ${fail} провал(ов)`); process.exit(1) }
 console.log(`✓ artifact self-test passed (${reg.roles.length} ролей, изоляция словарей, кодовый путь цел)`)

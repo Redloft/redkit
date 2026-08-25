@@ -1,0 +1,349 @@
+{
+ "version": 1,
+ "updated": "2026-08-20",
+ "_doc": [
+  "Канонический словарь линз петли самоулучшения (Ф1 из DESIGN-panel-v2.md).",
+  "Зачем: lens_key был свободнотекстовым — 480 уникальных ключей на 502 находки,",
+  "97% синглтоны, кластеризация мертва, solidify находил 1 тему из 282 находок.",
+  "",
+  "КОНТРАКТ. Meta-критик ОБЯЗАН выбрать key отсюда. Если ни один не подходит —",
+  "возвращает lens_key: 'new:<слаг>' + обязательный lens_rationale. Ключи new:* идут",
+  "в карантин и повышаются в канон ТОЛЬКО руками (сюда + строка в roles/_history/CHANGELOG.md).",
+  "",
+  "aliases[] — ТОЛЬКО слаги ранее встречавшихся ключей. Никаких фрагментов observation:",
+  "этот файл уходит в публичный redkit, а strip-secrets не знает про имена/ИНН/суммы.",
+  "",
+  "ОБЛАСТЬ ДЕЙСТВИЯ: канон применяется только к скиллам, где лежит свой lenses/canon.json.",
+  "Сейчас это plan-panel и finalize. redloft/redresearch/redsemantic работают как раньше —",
+  "решение осознанное: у них другая предметка ролей, общий канон дал бы ложные слияния.",
+  "Ретро-миграции старых 480 ключей НЕ БУДЕТ (решение Игоря 2026-07-27) — история",
+  "остаётся в карантине с отсечкой по дате, канон набирает счётчики с новых прогонов."
+ ],
+ "lenses": [
+  {
+   "key": "judge-covers-for-roles",
+   "role": "judge",
+   "title": "Судья добирает то, что должна была поймать роль",
+   "aliases": [
+    "gap-not-covered-by-any-role",
+    "judge-compensates-role-blindspot"
+   ]
+  },
+  {
+   "key": "concurrency-two-writers",
+   "role": "architect",
+   "title": "Два писателя в один ресурс без сериализации",
+   "aliases": [
+    "dom-ownership-contract",
+    "toctou-cached-state-vs-live-query",
+    "race-on-shared-state",
+    "accumulator-global-reset-at-entry",
+    "reset-partial-state-on-domain-switch"
+   ]
+  },
+  {
+   "key": "post-deploy-monitoring",
+   "role": "ops",
+   "title": "После выката никто не смотрит, живо ли оно",
+   "aliases": [
+    "post-deploy-automated-smoke",
+    "post-deploy-observability",
+    "deploy-script-error-trap",
+    "deploy-post-smoke-test"
+   ]
+  },
+  {
+   "key": "secrets-pii-egress",
+   "role": "security",
+   "title": "Чувствительное утекает за периметр",
+   "aliases": [
+    "secrets-in-persistent-store",
+    "auth-guard-scheme-not-checked",
+    "config-floor-non-overridability",
+    "cred-error-redaction",
+    "action-classification-heuristic-risk",
+    "exec-field-enumeration-completeness",
+    "ci-supply-chain-pinning"
+   ]
+  },
+  {
+   "key": "contract-undefined",
+   "role": "architect",
+   "title": "Межкомпонентный контракт не задан явно",
+   "aliases": [
+    "inter-phase-contract-schema",
+    "state-schema-versioning",
+    "adapter-contract-exit-taxonomy",
+    "step-dependency-order",
+    "open-items-impl-default",
+    "error-code-semantic-uniqueness",
+    "cross-file-contract-consistency",
+    "rsc-interactive-contract",
+    "cross-file-infra-path-consistency",
+    "uri-normalization-before-comparison"
+   ]
+  },
+  {
+   "key": "dod-without-threshold",
+   "role": "qa",
+   "title": "Done-when без проверяемого порога",
+   "aliases": [
+    "per-phase-done-when",
+    "acceptance-criterion-completeness",
+    "smoke-spec-completeness",
+    "smoke-signal-completeness"
+   ]
+  },
+  {
+   "key": "idempotency-missing",
+   "role": "backend",
+   "title": "Повторный прогон не безопасен",
+   "aliases": [
+    "idempotency-on-resume",
+    "external-channel-failure-handling"
+   ]
+  },
+  {
+   "key": "rollback-without-trigger",
+   "role": "ops",
+   "title": "Откат описан, но не сказано когда его жать",
+   "aliases": [
+    "rollback-existence-vs-executability",
+    "rollback-precondition-validation",
+    "rollback-runbook-pre-deploy",
+    "rollback-scope-vs-concurrent-writers"
+   ]
+  },
+  {
+   "key": "proxy-signal-not-outcome",
+   "role": "qa",
+   "title": "Успех меряется прокси-сигналом, а не результатом",
+   "aliases": [
+    "proxy-signal-vs-behavioral-assertion",
+    "success-signal-integrity",
+    "serve-environment-parity"
+   ]
+  },
+  {
+   "key": "live-verify-absent",
+   "role": "qa",
+   "title": "Нет прогона по реальному пути (write → read-back)",
+   "aliases": [
+    "test-pyramid-coverage",
+    "integration-guard-chain-not-tested",
+    "type-impedance-on-write",
+    "record-exhaustiveness-check",
+    "sort-key-type-safety",
+    "retention-policy-completeness",
+    "test-fixture-hermiticity",
+    "type-guard-before-content-scan",
+    "php-false-to-numeric-cast",
+    "framework-asset-ordering-empirical-verify",
+    "css-scope-expansion-audit",
+    "order-sensitive-css-invariant",
+    "css-motion-a11y"
+   ]
+  },
+  {
+   "key": "downstream-consumers-unenumerated",
+   "role": "data",
+   "title": "Семантика существующего поля/ответа меняется без переписи потребителей",
+   "aliases": [
+    "data-lineage",
+    "new:data-lineage",
+    "response-semantics-change",
+    "new:downstream-consumers-unenumerated"
+   ]
+  },
+  {
+   "key": "manual-input-integrity",
+   "role": "data",
+   "title": "Значение, вводимое человеком, без ограничения целостности на уровне хранилища",
+   "aliases": [
+    "new:manual-entry-referential-integrity",
+    "manual-entry-referential-integrity"
+   ]
+  },
+  {
+   "key": "content-vs-structure-idempotency",
+   "role": "data",
+   "title": "Идемпотентность проверена для структуры, но не для содержимого",
+   "aliases": [
+    "new:field-provenance-fidelity",
+    "field-provenance-fidelity"
+   ]
+  },
+  {
+   "key": "precedent-applied-without-check",
+   "role": "data",
+   "title": "Решение перенесено по аналогии с прецедентом без проверки, что механизм тот же",
+   "aliases": [
+    "new:precedent-mechanism-verification",
+    "precedent-mechanism-verification"
+   ]
+  },
+  {
+   "key": "unhappy-path-per-automated-step",
+   "role": "business-analyst",
+   "title": "Автоматический шаг процесса без описанного поведения при отказе",
+   "aliases": [
+    "new:external-dependency-failure-mode-unchecked",
+    "external-dependency-failure-mode-unchecked",
+    "new:gate-precondition-failure-mode-consistency",
+    "gate-precondition-failure-mode-consistency"
+   ]
+  },
+  {
+   "key": "risk-symmetry",
+   "role": "business-analyst",
+   "title": "Риск разобран только там, где автор сам его назвал; симметричный — тише и не пойман",
+   "aliases": [
+    "new:risk-symmetry-check",
+    "risk-symmetry-check"
+   ]
+  },
+  {
+   "key": "overlap-with-existing-system",
+   "role": "business-analyst",
+   "title": "Новый поток дублирует уже живущий в системе для той же цели",
+   "aliases": [
+    "new:existing-system-overlap",
+    "existing-system-overlap"
+   ]
+  },
+  {
+   "key": "legal-trigger-blindspot",
+   "role": "business-analyst",
+   "title": "Артефакт называет правовой узел, но профильная роль не активирована",
+   "aliases": [
+    "new:legal-trigger-blindspot",
+    "pdn-consent-in-form-brief",
+    "new:pdn-consent-in-form-brief"
+   ]
+  },
+  {
+   "key": "privacy-perimeter-people",
+   "role": "business-analyst",
+   "title": "Инвариант приватности задан по системам, но не по людям-получателям",
+   "aliases": [
+    "new:privacy-perimeter-people-not-systems",
+    "privacy-perimeter-people-not-systems"
+   ]
+  },
+  {
+   "key": "compliance-gate-missing",
+   "role": "product-critic",
+   "title": "Обязательный внешний гейт (платёжный/нормативный) не заложен в запуск",
+   "aliases": [
+    "new:payment-compliance-gate-missing",
+    "payment-compliance-gate-missing"
+   ]
+  },
+  {
+   "key": "question-without-commitment",
+   "role": "product-critic",
+   "title": "Вопрос сформулирован так, что не обязывает к ответу или отвечает сам себе",
+   "aliases": [
+    "new:question-without-commitment"
+   ]
+  },
+  {
+   "key": "delivery-format-unchecked",
+   "role": "client-advocate",
+   "title": "Жанр доставки артефакта (устно, по времени, с экрана) не учтён при разборе",
+   "aliases": [
+    "new:delivery-format-unchecked",
+    "recipient-clarity-format"
+   ]
+  },
+  {
+   "key": "jargon-sweep-incomplete",
+   "role": "editor-ru",
+   "title": "Термин расшифрован выборочно: один нашли, соседний того же класса пропустили",
+   "aliases": [
+    "new:exhaustive-jargon-sweep",
+    "exhaustive-jargon-sweep"
+   ]
+  },
+  {
+   "key": "silent-state-change-uncommunicated",
+   "role": "frontend",
+   "title": "Видимость или состояние данных меняется молча, без сообщения пользователю",
+   "aliases": [
+    "states-missing",
+    "new:states-missing"
+   ]
+  },
+  {
+   "key": "irreversible-shared-resource",
+   "role": "security",
+   "title": "Необратимый шаг над ресурсом, у которого есть потребители вне проекта",
+   "aliases": [
+    "new:irreversible-shared-resource-blast-radius",
+    "revoke-without-ownership-check",
+    "destructive-op-blast-radius"
+   ]
+  },
+  {
+   "key": "stated-scope-not-reconciled",
+   "role": "architect",
+   "title": "Названный в постановке объём не сверен с тем, что реально перечислено в плане",
+   "aliases": [
+    "new:stated-scope-not-reconciled",
+    "scope-anchoring",
+    "count-mismatch-task-vs-plan"
+   ]
+  },
+  {
+   "key": "review-target-freshness",
+   "role": "backend",
+   "title": "Ревью идёт по снимку, который автор успел изменить",
+   "aliases": [
+    "new:review-target-freshness",
+    "stale-diff-under-review",
+    "snapshot-drift-during-review"
+   ]
+  },
+  {
+   "key": "seam-clause-header-vs-body",
+   "role": "security",
+   "title": "Форма строки принята за её роль в машинном формате",
+   "aliases": [
+    "new:format-prefix-ambiguity",
+    "header-detected-by-regex",
+    "diff-header-vs-content"
+   ]
+  },
+  {
+   "key": "shared-utility-consumer-trace",
+   "role": "architect",
+   "title": "Правка общей утилиты не прослежена по всем её потребителям",
+   "aliases": [
+    "new:shared-utility-consumer-trace",
+    "single-entry-point-blast-radius"
+   ]
+  },
+  {
+   "key": "net-benefit-unverified",
+   "role": "qa",
+   "title": "Заявленная выгода плана не проверена нетто",
+   "aliases": [
+    "bidirectional-cost-accounting",
+    "effort-budget-fit",
+    "goal-metric-alignment",
+    "new:effort-budget-fit"
+   ]
+  },
+  {
+   "key": "premise-unverified-in-system",
+   "role": "architect",
+   "title": "Роль обосновала вывод утверждением, которое не проверила в системе",
+   "aliases": [
+    "existing-mechanism-check-before-critical",
+    "new:existing-mechanism-check-before-critical",
+    "premise-source-classification",
+    "unverified-compensating-control"
+   ]
+  }
+ ]
+}
