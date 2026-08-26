@@ -25,3 +25,11 @@ __pycache__/
 core/publish-gate.names
 
 .finalize/
+
+# Vendor-кэши чужих файлов (design-md, web-interface-guidelines): воспроизводимы из
+# pinned SHA командой get.sh/check.sh --refill, поэтому чужой контент в репо не тащим.
+**/assets/vendor/
+*.quarantine
+# Рантайм-журналы выдач/обратной связи — данные, не код.
+**/provenance.jsonl
+**/scoreboard.jsonl
