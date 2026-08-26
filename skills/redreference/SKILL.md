@@ -73,6 +73,49 @@ Phase RENDER → taste-profile.json + reference-likes.md (redloft-совмест
 | B (scraper) | Land-book | cffi_get.sh + redproxy | recon-pending |
 | link-only | Pinterest, Dribbble, Mobbin, Refero, SiteInspire, Httpster, Lapa, Godly, Savee | НЕ скрейпим (ToS) | только ссылка в UI |
 | screenshot | Thum.io→Microlink→Firecrawl→Playwright | только если у карточки нет `thumbnail_url` | post-MVP (budget per run) |
+| C (token-level) | **awesome-design-md** (github.com/VoltAgent/awesome-design-md, MIT) | конкретный DESIGN.md по имени бренда, pinned SHA (не live-fetch — см. ниже) | доступно по запросу |
+
+**Класс C отличается от A/B по уровню.** A/B дают скриншот-референсы (визуальный вкус, оценивается
+глазами). Класс C даёт **жёсткие токены** (hex-цвета, font-stack, spacing, radius) конкретного
+бренда — когда Игорь говорит «хочу как у Stripe/Linear/Notion», вместо словесного описания стиля
+подтянуть его DESIGN.md как constraints для `page-design-pipeline`/`emil-design-eng`.
+
+Реализован в `~/.claude/skills/_shared/design-md/` (полная документация — README там же):
+
+```bash
+bash ~/.claude/skills/_shared/design-md/get.sh --list                   # 74 бренда
+DESIGN_MD_CALLER=redreference \
+  bash ~/.claude/skills/_shared/design-md/get.sh --wrapped stripe       # → в промпт
+```
+
+**Pinned, не live-fetch.** Имя бренда резолвится только через allowlist `brands.json` (URL из
+пользовательской строки не собирается), файл лежит локально под зафиксированным `repo_sha` с
+записанным sha256; нет сайдкара — отказ, а не выдача непроверенного файла. Сеть — один раз на
+бренд, дальше кэш.
+
+**F6 соблюдён** (тот же инвариант, что для scraped-контента в `_shared.md`): при первой загрузке
+файл сканируется на инъекционные паттерны — в файле дизайн-токенов им взяться неоткуда, поэтому
+находка = **отказ с карантином**, а не тихая чистка. При подаче в промпт `--wrapped` оборачивает
+содержимое в `DATA_START…DATA_END`. Документная версия, не `sanitize.sh strip_instructions()`:
+тот сделан под короткие поля (обрезка 280 символов, схлопывание переносов) и уничтожил бы
+500-строчный DESIGN.md.
+
+⚠️ **Отдать токены — половина дела, надо проверить обратно.** После сборки прогнать round-trip,
+иначе «взяли токены Stripe» остаётся заявлением, а не фактом:
+```bash
+D=$(bash ~/.claude/skills/_shared/design-md/get.sh stripe)
+python3 ~/.claude/skills/_shared/design-md/verify-tokens.py \
+  "$D" --expect-sha "$(cat "$D.sha256")" --dir ./src
+```
+⚠️ **exit 2 = ABSTAIN, это НЕ успех**: инструмент не смог проверить (стиль задан Tailwind/
+токенами, не тот эталон, пустая выборка). Отчитываться «сверка прошла» в этом случае нельзя —
+ровно эта дыра (зелёный отчёт при нулевой выборке) была в первой редакции.
+
+Round-trip же ловит кириллицу: у Geist, Söhne, Clash Display и половины премиум-шрифтов из этих
+файлов её **нет** — прямое применение токенов Stripe/Linear к RU-странице ломает шрифт молча.
+
+Апстрим PR от сообщества не принимает (curated) — коллекция статична, бампить pin чаще раза в
+квартал незачем. Разбор — `plan-panel` 2026-08-26.
 
 Правовая рамка: данные для личного inspiration-ресёрча, не реселл; атрибуция источника на каждой карточке. **`robots.txt` гейтит ТОЛЬКО Class-B скраперы** (`lib/robots.sh` перед первым запросом к домену) — Class-A API-адаптеры ходят документированным/санкционированным API (напр. Are.na robots = `Disallow: /` для краулеров, но v2 API — публичный программный контракт; OnePageLove robots сам отсылает к API). Unsplash (если используется) — только хотлинк+атрибуция.
 
