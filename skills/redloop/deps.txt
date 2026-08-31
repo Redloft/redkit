@@ -1,0 +1,4 @@
+# redloop заряжает и наблюдает (runtime-invoke):
+redwork      # раннер для код→прод
+plan-panel   # чекер плана
+finalize     # чекер реализации (P-FRESH)
