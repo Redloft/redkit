@@ -8,6 +8,9 @@ for s in events detect contract-lint patterns compile escalate; do
   [ $rc -ne 0 ] && fail=1
 done
 
+out="$(python3 "$HERE/dashboard.py" --self-test 2>&1)"; rc=$?
+echo "$out" | tail -3; [ $rc -ne 0 ] && fail=1
+
 echo "--- сквозной smoke ---"
 T="$(mktemp -d)"; rd="$T/runs/run-smoke"; mkdir -p "$rd"
 export REDLOOP_STATS_DIR="$T/stats" REDLOOP_ESCALATE_DRYRUN=1

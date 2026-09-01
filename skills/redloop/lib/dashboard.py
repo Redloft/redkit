@@ -43,10 +43,19 @@ def build(rd, stage):
 
     dod = contract.get("dod") or []
     dod_total = len(dod)
-    green = {e["payload"]["check_id"] for e in ev
-             if e.get("event_type") == "check_result" and e["payload"].get("exit_code") == 0}
-    red = {e["payload"]["check_id"] for e in ev
-           if e.get("event_type") == "check_result" and e["payload"].get("exit_code") != 0} - green
+    # ⚠ статус проверки = ПОСЛЕДНЕЕ её событие, а не «когда-либо была зелёной».
+    # Иначе проверка, позеленевшая на 3-й итерации и упавшая на 15-й, навсегда остаётся
+    # зелёной, и карточка рапортует «прогон завершён» поверх красного прогона.
+    # Та же семантика, что у PREMATURE-EXIT в detect.sh — один смысл на двух потребителей.
+    last_by_check = {}
+    for e in sorted((x for x in ev if x.get("event_type") == "check_result"),
+                    key=lambda x: x.get("seq", 0)):
+        last_by_check[e["payload"].get("check_id")] = e
+    green = {c for c, e in last_by_check.items()
+             if e.get("kind") != "blocked" and e["payload"].get("exit_code") == 0}
+    blocked = {c for c, e in last_by_check.items() if e.get("kind") == "blocked"}
+    red = {c for c, e in last_by_check.items()
+           if e.get("kind") != "blocked" and e["payload"].get("exit_code") != 0}
     iters = [e for e in ev if e.get("event_type") == "iter_done"]
     iter_n = len(iters)
     iter_of = (contract.get("budget") or {}).get("max_iters")
@@ -61,6 +70,10 @@ def build(rd, stage):
     hard = [d for d in det if not d.get("shadow")]
     if done_ev and dod_total and len(green) == dod_total:
         status, tone = "прогон завершён", "success"
+    elif done_ev and blocked and not red and (len(green) + len(blocked)) == dod_total:
+        # «ждёт владельца» только когда ВСЕ строки DoD разобраны: иначе недоделанная работа
+        # маскируется под внешнюю блокировку
+        status, tone = "закрыт частично · ждёт владельца", "warning"
     elif hard:
         status, tone = "нужен человек", "danger"
     elif det:
@@ -102,6 +115,7 @@ def build(rd, stage):
     for d in dod:
         cid = d.get("id", "?")
         if cid in green: ico, col, note = "ti-circle-check", "var(--text-success)", "зелёная"
+        elif cid in blocked: ico, col, note = "ti-lock", "var(--text-warning)", "заблокирована внешним"
         elif cid in red: ico, col, note = "ti-circle-x", "var(--text-danger)", "красная"
         elif not d.get("cmd"): ico, col, note = "ti-user", "var(--text-secondary)", "приёмка человеком"
         else: ico, col, note = "ti-circle-dashed", "var(--text-muted)", "не запускалась"
@@ -161,7 +175,54 @@ def build(rd, stage):
   <span>обновлено {upd}</span>
 </div>"""
 
+def _self_test():
+    """Минимальная проверка ветки статусов: зелёная→красная и зелёная→blocked."""
+    import tempfile, subprocess, shutil
+    here = os.path.dirname(os.path.abspath(__file__)); fails = []
+    def run(rd, *args):
+        subprocess.run(["bash", os.path.join(here, "events.sh"), "append", rd] + list(args),
+                       capture_output=True)
+    def fixture(tmp, name, seq):
+        rd = os.path.join(tmp, name); os.makedirs(rd, exist_ok=True)
+        json.dump({"task": "t", "budget": {"max_iters": 5},
+                   "dod": [{"id": "a", "cmd": "x", "expect_exit": 0},
+                           {"id": "b", "cmd": "y", "expect_exit": 0}]},
+                  open(os.path.join(rd, "contract.json"), "w"))
+        run(rd, "run_start", '{"runner":"session","contract_sha":"a"}')
+        run(rd, "iter_done", '{"task_id":"t","files_changed":1,"checkboxes_done":1}', "--iter", "1", "--of", "2")
+        for payload in seq:
+            run(rd, "check_result", payload, "--iter", "1")
+        run(rd, "run_done", '{"verdict":"partial","iters":1,"interventions":0}')
+        return rd
+    tmp = tempfile.mkdtemp()
+    try:
+        # была зелёной, стала красной — карточка обязана показать красную, а не «завершён»
+        rd = fixture(tmp, "regress", ['{"check_id":"a","cmd_hash":"h","exit_code":0}',
+                                      '{"check_id":"b","cmd_hash":"h","exit_code":0}',
+                                      '{"check_id":"a","cmd_hash":"h","exit_code":1}'])
+        html = build(rd, "S6")
+        if "прогон завершён" in html: fails.append("регрессия зелёной проверки выдана за успех")
+        if "красная" not in html: fails.append("красная проверка не показана")
+        # зелёная + заблокированная внешним = «ждёт владельца»
+        rd = fixture(tmp, "blocked", ['{"check_id":"a","cmd_hash":"h","exit_code":0}',
+                                      '{"check_id":"b","cmd_hash":"h","exit_code":1,"result":"blocked_owner_action"}'])
+        html = build(rd, "S6")
+        if "ждёт владельца" not in html: fails.append("blocked-прогон не помечен как ждущий владельца")
+        if "заблокирована внешним" not in html: fails.append("blocked-строка не подписана")
+        # частичное покрытие DoD не должно выдаваться за «ждёт владельца»
+        rd = fixture(tmp, "partial", ['{"check_id":"a","cmd_hash":"h","exit_code":1,"result":"blocked_by_env"}'])
+        html = build(rd, "S6")
+        if "ждёт владельца" in html: fails.append("недоделанный DoD замаскирован под внешнюю блокировку")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    for f in fails: print("  ✗", f)
+    print("✓ dashboard self-test passed" if not fails else "✗ dashboard self-test FAILED")
+    return 1 if fails else 0
+
+
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        sys.exit(_self_test())
     if len(sys.argv) < 2:
         print("usage: dashboard.py <run_dir> [--stage S3]", file=sys.stderr); sys.exit(1)
     rd = sys.argv[1]

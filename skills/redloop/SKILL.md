@@ -77,11 +77,20 @@ P-UNTRUSTED — входят всегда; остальные по success_rate;
 карантина приёма или правки autonomy-gate → перекомпилировать, не стартовать замороженным снапшотом.
 
 ### S5. WATCH
-Прогон пишет журнал (`lib/events.sh append`, единственный писатель — сессия). Детекторы:
+Прогон пишет журнал (`lib/events.sh append`, единственный писатель — сессия).
+**Каждая итерация обязана дать `iter_done`** — иначе `run_done` будет отвергнут кодом 4
+(`reason=no_iterations_logged`). Это не придирка: два первых живых прогона дали 5 и 3 события
+на 22 и 19 итераций, и детекторы весь прогон были слепы. Проверка, упёршаяся во внешнее
+(нет токена, снят доступ), пишется как `check_result` с `result: blocked_by_env` или
+`blocked_owner_action` — она не красная и не зелёная, и владелец увидит её отдельным сигналом.
+Детекторы:
 ```bash
 bash lib/detect.sh scan <run_dir>
 ```
-STALL · LOOP · RETRY-BURN · DRIFT · PREMATURE-EXIT · ASK-STORM (SILENCE — внешний сторож по heartbeat).
+STALL · LOOP · RETRY-BURN · DRIFT · PREMATURE-EXIT · ASK-STORM · **BUDGET-OVERRUN** ·
+**BLOCKED-EXTERNAL** (SILENCE — внешний сторож по heartbeat).
+Детекторы изолированы друг от друга: падение одного даёт отдельный сигнал `DETECTOR-BROKEN`,
+а не молчание всего разбора.
 **Все детекторы стартуют в shadow**: пишут события, но НЕ будят человека. Выход из shadow —
 `lib/detect.sh calibration`: FP-rate <10% на ≥5 живых прогонах, флип руками в `stats/detectors.json`.
 Сработал не-shadow детектор → эскалация:
@@ -141,6 +150,13 @@ python3 lib/dashboard.py <run_dir> --stage S3
   автономный прогон нельзя оставлять совсем без присмотра на часы — и говорить об этом прямо,
   а не подразумевать. Закрывается в Ф2: машинный расчёт `out_of_scope` из `git diff --name-only`
   против `scope_globs` + подключение redjob к `runs/`.
+
+## Рубильники
+| переменная | по умолчанию | зачем |
+|---|---|---|
+| `REDLOOP_STRICT_JOURNAL` | `1` | `0` снимает ужесточения записи журнала на конкретном прогоне |
+| `REDLOOP_AUTO_FINAL_NOTIFY` | `0` | `1` включает авто-отправку финала в TG (после live-verify канала) |
+| `REDLOOP_TG_CHAT` / `REDLOOP_TG_CHAT_FILE` | env / `~/.claude/.redloop-tg-chat` | адресат эскалаций |
 
 ## Проверка
 ```bash

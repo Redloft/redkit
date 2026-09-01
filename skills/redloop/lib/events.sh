@@ -16,11 +16,13 @@ GUARD_OK=1
 source "$HERE/secret-guard.sh" || GUARD_OK=0
 
 VALID_TYPES="run_start iter_start iter_done check_result runner_error assumption question detector_fire escalation run_done heartbeat"
-VALID_KINDS="progress infra_failure negative_verdict"
+VALID_KINDS="progress infra_failure negative_verdict blocked"
+# закрытый enum причин блокировки: свободный текст здесь развалит машинное чтение
+BLOCKED_RESULTS="blocked_by_env blocked_owner_action"
 FORBIDDEN_FIELDS="stdout stderr raw output command_output"
 
 _required() { case "$1" in
-  run_start)     echo "runner contract_sha" ;;
+  run_start)     echo "runner contract_sha" ;;   # budget/strict_journal дописываются ниже
   iter_start)    echo "task_id" ;;
   iter_done)     echo "task_id files_changed checkboxes_done" ;;
   check_result)  echo "check_id cmd_hash exit_code" ;;
@@ -41,6 +43,62 @@ _lock() { local lk="$1" i
     if [ "${p:-0}" -gt 0 ] && ! kill -0 "$p" 2>/dev/null; then rm -rf "$lk"; else sleep 0.05; fi
   done; return 1; }
 
+
+# ── политика журнала (И1/И3, v3) ───────────────────────────────────────────────
+# Строгость фиксируется в run_start и дальше читается ИЗ ЖУРНАЛА, а не из окружения:
+# иначе прогон, стартовавший до выката, потерял бы финал на ужесточении (панель, critical #6).
+# Рубильник: REDLOOP_STRICT_JOURNAL=0 на старте прогона.
+_strict_of_run() {
+  local rd="$1"
+  [ -f "$rd/events.jsonl" ] || { echo "${REDLOOP_STRICT_JOURNAL:-1}"; return; }
+  # ⚠ НЕ `// empty`: в jq оператор // считает false пустым, и рубильник strict=0 молча
+  # превращался бы в strict=1 — то есть выключатель не выключал бы.
+  local v; v="$(jq -s -r 'map(select(.event_type=="run_start"))|.[0].payload
+                          | if has("strict_journal") then (.strict_journal|tostring) else "" end' \
+                "$rd/events.jsonl" 2>/dev/null)"
+  # Журнал есть, а поля нет → прогон стартовал ДО выката v3. Такой доживает по старым
+  # правилам (strict=0): иначе обещание «идущий прогон не потеряет финал» было бы ложным.
+  case "$v" in true) echo 1 ;; false) echo 0 ;; *) echo 0 ;; esac
+}
+
+# Отказ по политике: код 4 (машинно отличим от 1 «невалидный вход») + причина в машинном виде.
+_reject() { echo "✗ REJECT reason=$1 :: $2" >&2; return 4; }
+
+_policy_check() {
+  local rd="$1" et="$2" payload="$3"
+  [ "$et" = "run_done" ] || return 0
+  local strict; strict="$(_strict_of_run "$rd")"
+  # ⚠ отсутствие журнала — не повод пропустить политику: run_done первым событием означает
+  # ровно ноль итераций, то есть самый слепой прогон из возможных.
+  if [ ! -f "$rd/events.jsonl" ]; then
+    [ "$strict" = "1" ] || return 0
+    _reject no_iterations_logged "финал первым событием прогона — в журнале нет ни одной итерации"; return 4
+  fi
+
+  # И3: финал объявляется ОДИН раз. Идентичный повтор — no-op (ретрай раннера),
+  # отличающийся payload — отказ: это «доделал после финала», ему нужен новый run_id.
+  local prev; prev="$(jq -s -c 'map(select(.event_type=="run_done"))|.[-1].payload // empty' "$rd/events.jsonl" 2>/dev/null)"
+  if [ -n "$prev" ] && [ "$prev" != "null" ]; then
+    if [ "$(printf '%s' "$prev" | jq -S -c .)" = "$(printf '%s' "$payload" | jq -S -c .)" ]; then
+      echo "⚠ run_done уже записан с тем же payload — повтор проигнорирован (no-op)" >&2
+      return 9   # 9 = идемпотентный no-op, не ошибка
+    fi
+    if [ "$strict" = "1" ]; then
+      _reject run_done_already_recorded "финал уже объявлен; продолжение работы = новый run_id"; return 4
+    fi
+    echo "⚠ второй run_done (strict off) — записываю" >&2
+  fi
+
+  # И1: финал без единой итерации в журнале означает, что пять детекторов из шести были слепы.
+  if [ "$strict" = "1" ]; then
+    local iters; iters="$(jq -s '[.[]|select(.event_type=="iter_done")]|length' "$rd/events.jsonl" 2>/dev/null || echo 0)"
+    if [ "${iters:-0}" -eq 0 ]; then
+      _reject no_iterations_logged "финал без единого iter_done — детекторы слепые; пиши iter_done каждую итерацию"; return 4
+    fi
+  fi
+  return 0
+}
+
 append() {
   local rd="${1:?run_dir}" et="${2:?event_type}" payload="${3:?payload_json}"; shift 3
   local kind="" sev="info" iter="null" of="null"
@@ -55,7 +113,16 @@ append() {
   if [ -z "$kind" ]; then
     case "$et" in
       runner_error) kind="infra_failure" ;;
-      check_result) [ "$(printf '%s' "$payload" | jq -r '.exit_code')" = "0" ] && kind="progress" || kind="negative_verdict" ;;
+      check_result)
+        # порядок важен: blocked проверяется ПЕРВЫМ, иначе exit≠0 штампует negative_verdict
+        # и заблокированная внешним проверка навсегда считается красной (панель, critical #1)
+        local res; res="$(printf '%s' "$payload" | jq -r '.result // ""')"
+        if [ -n "$res" ] && [ "${res#blocked}" != "$res" ]; then
+          echo "$BLOCKED_RESULTS" | grep -qw "$res" || {
+            echo "✗ result вне enum блокировок ($BLOCKED_RESULTS): $res" >&2; return 1; }
+          kind="blocked"
+        elif [ "$(printf '%s' "$payload" | jq -r '.exit_code')" = "0" ]; then kind="progress"
+        else kind="negative_verdict"; fi ;;
       *) kind="progress" ;;
     esac
   fi
@@ -77,17 +144,37 @@ append() {
     echo "✗ secret-guard недоступен ($HERE/secret-guard.sh) — отказываюсь писать журнал" >&2; return 1; fi
   if kw_secret_found "$payload"; then echo "✗ payload содержит секрет-паттерн — отказ" >&2; return 1; fi
 
+  _policy_check "$rd" "$et" "$payload" || { local pc=$?; [ "$pc" = "9" ] && return 0; return $pc; }
+
   mkdir -p "$rd"
   local lk="$rd/.events.lock"; _lock "$lk" || { echo "✗ lock timeout" >&2; return 1; }
   local seq; local n=0; [ -f "$rd/events.jsonl" ] && n=$(wc -l < "$rd/events.jsonl" | tr -d " ")
   seq=$(( n + 1 ))
   local rid; rid="$(basename "$rd")"
+  # снапшот бюджета в сам журнал: детектор остаётся чистой функцией от events.jsonl (И2)
+  if [ "$et" = "run_start" ]; then
+    local strict_flag; [ "${REDLOOP_STRICT_JOURNAL:-1}" = "0" ] && strict_flag=false || strict_flag=true
+    local budget="null"
+    [ -f "$rd/contract.json" ] && budget="$(jq -c '.budget // null' "$rd/contract.json" 2>/dev/null || echo null)"
+    payload="$(printf '%s' "$payload" | jq -c --argjson b "$budget" --argjson sj "$strict_flag" \
+      '. + {budget: (.budget // $b), strict_journal: (.strict_journal // $sj)}')"
+  fi
   jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg rid "$rid" --argjson seq "$seq" \
      --arg et "$et" --arg kind "$kind" --arg sev "$sev" \
      --argjson iter "$iter" --argjson of "$of" --argjson p "$payload" \
      '{schema_version:1, ts:$ts, run_id:$rid, seq:$seq, event_type:$et, kind:$kind,
        severity:$sev, denominator:{iter:$iter, of:$of}, payload:$p}' >> "$rd/events.jsonl"
   rm -rf "$lk"
+
+  # финал прогона обязан дойти до человека (И6). ВНЕ лока — escalate.sh сам пишет событие
+  # через этот же events.sh, и вызов из-под лока молча провалился бы на каждом прогоне.
+  # Пока путь op run → TG не подтверждён живым прогоном, по умолчанию выключено.
+  if [ "$et" = "run_done" ] && [ "${REDLOOP_AUTO_FINAL_NOTIFY:-0}" = "1" ]; then
+    # только машинные поля: свободный текст агента во внешний канал не уезжает (панель, critical #3)
+    local diag; diag="$(printf '%s' "$payload" | jq -r '"verdict=\(.verdict) dod=\(.dod_green // "?")/\(.dod_total // "?") iters=\(.iters // "?")"')"
+    bash "$HERE/escalate.sh" "$rd" RUN_DONE none "$diag" >/dev/null || \
+      echo "⚠ финал не доставлен (escalate exit $?) — смотри $rd/escalations.log" >&2
+  fi
   return 0
 }
 
@@ -106,6 +193,48 @@ self_test() {
   ok $((1-$?)) "raw stdout в payload отвергнут"
   append "$rd" nonsense '{"a":1}' >/dev/null 2>&1; ok $((1-$?)) "неизвестный event_type отвергнут"
   append "$rd" run_start '{"runner":"loop"}' >/dev/null 2>&1; ok $((1-$?)) "нет обязательного поля → отказ"
+
+  # ── v3: политика журнала ────────────────────────────────────────────────
+  # И1: финал без единой итерации отвергается кодом 4 (машинно отличим от 1)
+  local R1="$T/r-noiter"; append "$R1" run_start '{"runner":"loop","contract_sha":"a"}' >/dev/null
+  append "$R1" run_done '{"verdict":"partial","iters":9,"interventions":0}' >/dev/null 2>&1
+  [ $? -eq 4 ]; ok $? "И1: run_done без iter_done → отказ с кодом 4"
+  append "$R1" iter_done '{"task_id":"t","files_changed":2,"checkboxes_done":1}' --iter 1 --of 3 >/dev/null
+  append "$R1" run_done '{"verdict":"partial","iters":9,"interventions":0}' >/dev/null; ok $? "И1: после iter_done финал проходит"
+  # И3: тот же payload — no-op; другой payload — отказ
+  append "$R1" run_done '{"verdict":"partial","iters":9,"interventions":0}' >/dev/null 2>&1; ok $? "И3: идентичный повтор финала = no-op"
+  [ "$(jq -s '[.[]|select(.event_type=="run_done")]|length' "$R1/events.jsonl")" = "1" ]; ok $? "И3: no-op не задвоил событие"
+  append "$R1" run_done '{"verdict":"SHIP","iters":22,"interventions":0}' >/dev/null 2>&1
+  [ $? -eq 4 ]; ok $? "И3: второй ОТЛИЧАЮЩИЙСЯ финал отвергнут"
+  # рубильник: прогон, стартовавший с strict=0, доживает по старым правилам
+  local R2="$T/r-loose"; REDLOOP_STRICT_JOURNAL=0 append "$R2" run_start '{"runner":"loop","contract_sha":"a"}' >/dev/null
+  append "$R2" run_done '{"verdict":"partial","iters":3,"interventions":0}' >/dev/null; ok $? "рубильник: strict=0 из run_start уважается"
+  [ "$(jq -s -r '.[0].payload.strict_journal' "$R2/events.jsonl")" = "false" ]; ok $? "режим строгости зафиксирован в журнале"
+  # run_done ПЕРВЫМ событием — самый слепой прогон, политика обязана сработать и без журнала
+  local R5="$T/r-first"; append "$R5" run_done '{"verdict":"SHIP","iters":5,"interventions":0}' >/dev/null 2>&1
+  [ $? -eq 4 ]; ok $? "И1: run_done первым событием отвергнут (журнала ещё нет)"
+  # прогон, начатый ДО выката v3 (run_start без strict_journal), финал не теряет
+  local R6="$T/r-legacy"; mkdir -p "$R6"
+  jq -nc '{schema_version:1,ts:"2026-08-31T22:10:16Z",run_id:"legacy",seq:1,event_type:"run_start",
+           kind:"progress",severity:"info",denominator:{iter:null,of:null},
+           payload:{runner:"session",contract_sha:"old"}}' > "$R6/events.jsonl"
+  append "$R6" run_done '{"verdict":"partial","iters":22,"interventions":0}' >/dev/null 2>&1
+  ok $? "старый прогон без strict_journal доживает по прежним правилам"
+
+  # И4: blocked — третий kind, а не префикс в payload
+  local R3="$T/r-blocked"
+  append "$R3" check_result '{"check_id":"smoke","cmd_hash":"h","exit_code":1,"result":"blocked_by_env"}' --iter 1 >/dev/null
+  [ "$(tail -1 "$R3/events.jsonl" | jq -r .kind)" = "blocked" ]; ok $? "И4: blocked_by_env → kind=blocked, а не negative_verdict"
+  append "$R3" check_result '{"check_id":"x","cmd_hash":"h","exit_code":1,"result":"blocked_by_mood"}' --iter 2 >/dev/null 2>&1
+  ok $((1-$?)) "И4: result вне enum блокировок отвергнут"
+  append "$R3" check_result '{"check_id":"y","cmd_hash":"h","exit_code":1}' --iter 3 >/dev/null
+  [ "$(tail -1 "$R3/events.jsonl" | jq -r .kind)" = "negative_verdict" ]; ok $? "И4: обычный красный по-прежнему negative_verdict"
+
+  # И2: бюджет снапшотится в run_start из contract.json (детектор не читает контракт)
+  local R4="$T/r-budget"; mkdir -p "$R4"
+  echo '{"budget":{"max_iters":14,"max_minutes":120}}' > "$R4/contract.json"
+  append "$R4" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  [ "$(jq -s -r '.[0].payload.budget.max_iters' "$R4/events.jsonl")" = "14" ]; ok $? "И2: бюджет снят в run_start"
   # guard недоступен → журнал НЕ пишется (fail-closed), а не пишется без проверки
   local G="$T/guardless"; mkdir -p "$G"
   cp "$HERE/events.sh" "$G/events.sh"

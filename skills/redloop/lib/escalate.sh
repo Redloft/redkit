@@ -16,7 +16,7 @@ CHAT_FILE="${REDLOOP_TG_CHAT_FILE:-$HOME/.claude/.redloop-tg-chat}"   # gitignor
 # ⚠ имена детекторов пишутся ТОЧНО так же, как их печатает detect.sh (через дефис).
 # Рассинхрон конвенций уже стоил трёх немых детекторов: escalate отвергал reason_code,
 # и RETRY-BURN / PREMATURE-EXIT / ASK-STORM физически не могли позвать человека.
-REASONS="STALL LOOP RETRY-BURN DRIFT PREMATURE-EXIT ASK-STORM SILENCE BUDGET_EXCEEDED CONTRACT_INVALID FLOOR_BLOCKED RUNNER_DEAD RUN_DONE NO_GO"
+REASONS="STALL LOOP RETRY-BURN DRIFT PREMATURE-EXIT ASK-STORM BUDGET-OVERRUN BLOCKED-EXTERNAL DETECTOR-BROKEN SILENCE BUDGET_EXCEEDED CONTRACT_INVALID FLOOR_BLOCKED RUNNER_DEAD RUN_DONE NO_GO"
 
 escalate() {
   local rd="${1:?run_dir}" reason="${2:?reason_code}" needs="${3:?needs_csv}" diag="${4:-}" sugg="${5:-}"
@@ -64,13 +64,23 @@ self_test() {
   printf '%s' "$out" | jq -e '.delivery=="dryrun"' >/dev/null; ok $? "канал отчитывается о доставке"
   [ -f "$rd/escalations.log" ]; ok $? "durable лог (пол доставки)"
   grep -q '"event_type":"escalation"' "$rd/events.jsonl"; ok $? "эскалация видна в журнале"
-  local d; for d in STALL LOOP RETRY-BURN DRIFT PREMATURE-EXIT ASK-STORM; do
+  # ⚠ имена берём ИЗ detect.sh, а не переписываем руками: ровно этот рассинхрон уже оставлял
+  # детекторы немыми, и второй раз он случился на BUDGET-OVERRUN/BLOCKED-EXTERNAL.
+  local d; for d in $(grep -o '^  DET_NAME=[A-Z-]*' "$HERE/detect.sh" | sed 's/.*=//' | sort -u); do
     escalate "$rd" "$d" "unblock" >/dev/null 2>&1; ok $? "детектор $d принимается эскалацией"
   done
+  # и обратная сверка: каждое имя детектора обязано быть в enum причин
+  local missing=""
+  for d in $(grep -o '^  DET_NAME=[A-Z-]*' "$HERE/detect.sh" | sed 's/.*=//' | sort -u) DETECTOR-BROKEN; do
+    echo "$REASONS" | grep -qw "$d" || missing="$missing $d"
+  done
+  [ -z "$missing" ]; ok $? "множества детекторов и причин эскалации совпадают (нет:$missing)"
   escalate "$rd" BOGUS "x" >/dev/null 2>&1; ok $((1-$?)) "невалидный reason_code отвергнут"
   escalate "$rd" RUN_DONE "none" "DoD зелёный" >/dev/null; ok $? "финал прогона тоже идёт в канал"
-  # литерал разрезан, иначе проверка находит саму себя (грабля канареек в publish-gate)
-  pat="1543""83433"; grep -q "$pat" "$HERE/escalate.sh"; ok $((1-$?)) "личный chat_id НЕ захардкожен (публичный репо)"
+  # ⚠ проверяем КЛАСС значения, а не конкретный id: разрезанный литерал реального chat_id
+  # в публичном репозитории тривиально собирается обратно — канарейка вносила бы то,
+  # отсутствие чего доказывает.
+  grep -nE 'CHAT="?[0-9]{6,}' "$HERE/escalate.sh" >/dev/null; ok $((1-$?)) "адресат не захардкожен числом (публичный репо)"
   # ⚠ pipefail жив даже при set +e: exit 3 из escalate утёк бы в статус пайпа и уронил проверку.
   # Поэтому сначала забираем вывод, потом отдельно проверяем его и отдельно — код возврата.
   unset REDLOOP_ESCALATE_DRYRUN

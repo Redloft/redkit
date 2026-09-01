@@ -58,9 +58,12 @@ record() { # применение приёма в прогоне → счётч�
 
 candidate() { # наблюдение-кандидат: ЖИВЁТ без TTL, ждёт второго независимого подтверждения
   local slug="${1:?slug}" run="${2:?run_id}" proj="${3:-?}" tt="${4:-?}" sess="${5:-?}"; shift 5 || true
+  # слаг без текста нечего ревьюить: в прогоне 20260901-0108 такой уже записан (ab-on-real-host)
+  local text="$*"   # склеиваем ДО проверки: "${*//...}" не ловит пробелы, разбитые по аргументам
+  [ -n "${text//[[:space:]]/}" ] || { echo "✗ кандидат без текста не принимается: $slug" >&2; return 1; }
   mkdir -p "$STATS"
   jq -nc --arg s "$slug" --arg run "$run" --arg ik "$(_ikey "$proj" "$tt" "$sess")" \
-     --arg text "$*" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --arg text "$text" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
      '{ts:$ts, slug:$s, run_id:$run, independence_key:$ik, text:$text}' >> "$CAND"
 }
 
@@ -100,6 +103,9 @@ self_test() {
   for i in 1 2 3 4 5; do record P-GOOD "r$i" ok "p$i" code "s$i"; done
   [ "$(demote_scan | jq '[.[] | select(.pattern_id=="P-GOOD")] | length')" = "0" ]; ok $? "здоровый приём не демотируется"
   [ -n "$(sha)" ]; ok $? "sha снапшота считается"
+  candidate cand-empty r9 proj9 code sess9 "" >/dev/null 2>&1; ok $((1-$?)) "И5: кандидат без текста отвергнут"
+  candidate cand-empty r9 proj9 code sess9 "   " >/dev/null 2>&1; ok $((1-$?)) "И5: кандидат из пробелов отвергнут"
+  candidate cand-empty r9 proj9 code sess9 " " " " " " >/dev/null 2>&1; ok $((1-$?)) "И5: пробелы, разбитые по аргументам, тоже отвергнуты"
   # приём без строки tokens не должен исчезать из библиотеки
   local PD="$T/pat"; mkdir -p "$PD"; printf -- '---\nid: P-NOTOK\napplies: always\n---\nтело\n' > "$PD/P-NOTOK.md"
   [ "$(REDLOOP_PATTERNS_DIR="$PD" bash "$HERE/patterns.sh" list | jq -s 'length')" = "1" ]
