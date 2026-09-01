@@ -44,6 +44,33 @@ _lock() { local lk="$1" i
   done; return 1; }
 
 
+# ── реестр прогонов (v3.1) ────────────────────────────────────────────────────
+# Прогоны живут ГДЕ УГОДНО: в папке скилла и в .redloop/runs/ самого проекта.
+# Пока учёт шёл по одному каталогу, третий живой прогон был невидим — а значит и
+# знаменатель калибровки («5 живых прогонов») считался по неполному парку.
+REG="${REDLOOP_INDEX:-$(cd "$HERE/.." && pwd)/runs/index.jsonl}"
+
+_register_run() {
+  local rd="$1" payload="$2"
+  local abs; abs="$(cd "$rd" 2>/dev/null && pwd)" || abs="$rd"
+  mkdir -p "$(dirname "$REG")" 2>/dev/null || true
+  # идемпотентно: повторный run_start того же прогона не плодит строк
+  # у реестра свой лок: второй писатель без сериализации — тот же класс, что уже держим
+  # под локом для events.jsonl
+  local rlk="$REG.lock"; _lock "$rlk" || { echo "⚠ реестр занят, прогон не зарегистрирован" >&2; return 0; }
+  if [ -f "$REG" ] && grep -qF "\"path\":\"$abs\"" "$REG" 2>/dev/null; then rm -rf "$rlk"; return 0; fi
+  # ⚠ Текст задачи в реестр НЕ копируем. Это был единственный писатель, обходивший
+  # fail-closed секрет-гард: формулировка задачи может содержать что угодно, а реестр
+  # читают и сторож, и калибровка. Им хватает пути, run_id, раннера и режима.
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg rid "$(basename "$rd")" \
+     --arg path "$abs" \
+     --arg runner "$(printf '%s' "$payload" | jq -r '.runner // "?"')" \
+     --arg mode "$(printf '%s' "$payload" | jq -r '.mode // "autonomous"')" \
+     '{ts:$ts, run_id:$rid, path:$path, runner:$runner, mode:$mode}' >> "$REG" 2>/dev/null \
+    || echo "⚠ прогон не попал в реестр ($REG) — он будет невидим для калибровки и статуса" >&2
+  rm -rf "$rlk"
+}
+
 # ── политика журнала (И1/И3, v3) ───────────────────────────────────────────────
 # Строгость фиксируется в run_start и дальше читается ИЗ ЖУРНАЛА, а не из окружения:
 # иначе прогон, стартовавший до выката, потерял бы финал на ужесточении (панель, critical #6).
@@ -154,10 +181,14 @@ append() {
   # снапшот бюджета в сам журнал: детектор остаётся чистой функцией от events.jsonl (И2)
   if [ "$et" = "run_start" ]; then
     local strict_flag; [ "${REDLOOP_STRICT_JOURNAL:-1}" = "0" ] && strict_flag=false || strict_flag=true
-    local budget="null"
-    [ -f "$rd/contract.json" ] && budget="$(jq -c '.budget // null' "$rd/contract.json" 2>/dev/null || echo null)"
-    payload="$(printf '%s' "$payload" | jq -c --argjson b "$budget" --argjson sj "$strict_flag" \
-      '. + {budget: (.budget // $b), strict_journal: (.strict_journal // $sj)}')"
+    local budget="null" mode="autonomous"
+    if [ -f "$rd/contract.json" ]; then
+      budget="$(jq -c '.budget // null' "$rd/contract.json" 2>/dev/null || echo null)"
+      mode="$(jq -r '.mode // "autonomous"' "$rd/contract.json" 2>/dev/null || echo autonomous)"
+    fi
+    [ "$mode" = "autonomous" ] || [ "$mode" = "assisted" ] || mode="autonomous"
+    payload="$(printf '%s' "$payload" | jq -c --argjson b "$budget" --argjson sj "$strict_flag" --arg m "$mode" \
+      '. + {budget: (.budget // $b), strict_journal: (.strict_journal // $sj), mode: (.mode // $m)}')"
   fi
   jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg rid "$rid" --argjson seq "$seq" \
      --arg et "$et" --arg kind "$kind" --arg sev "$sev" \
@@ -165,6 +196,9 @@ append() {
      '{schema_version:1, ts:$ts, run_id:$rid, seq:$seq, event_type:$et, kind:$kind,
        severity:$sev, denominator:{iter:$iter, of:$of}, payload:$p}' >> "$rd/events.jsonl"
   rm -rf "$lk"
+
+  # реестр — ПОСЛЕ снятия лока (пишем в чужой файл, лок журнала к нему отношения не имеет)
+  [ "$et" = "run_start" ] && _register_run "$rd" "$payload"
 
   # финал прогона обязан дойти до человека (И6). ВНЕ лока — escalate.sh сам пишет событие
   # через этот же events.sh, и вызов из-под лока молча провалился бы на каждом прогоне.
@@ -180,6 +214,7 @@ append() {
 
 self_test() {
   set +e; local T; T="$(mktemp -d)"; local rd="$T/run-abc"; local fail=0
+  export REDLOOP_INDEX="$T/index.jsonl"; REG="$REDLOOP_INDEX"   # боевой реестр не трогаем
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   append "$rd" run_start '{"runner":"loop","contract_sha":"abc"}' >/dev/null; ok $? "run_start"
   append "$rd" check_result '{"check_id":"t1","cmd_hash":"h","exit_code":1}' --iter 1 --of 5 >/dev/null; ok $? "check_result"
@@ -235,6 +270,27 @@ self_test() {
   echo '{"budget":{"max_iters":14,"max_minutes":120}}' > "$R4/contract.json"
   append "$R4" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
   [ "$(jq -s -r '.[0].payload.budget.max_iters' "$R4/events.jsonl")" = "14" ]; ok $? "И2: бюджет снят в run_start"
+
+  # режим прогона попадает в журнал: assisted — человек пишет промпты сам и задаёт темп
+  local RM="$T/r-mode"; mkdir -p "$RM"
+  echo '{"mode":"assisted","budget":{"max_iters":3}}' > "$RM/contract.json"
+  append "$RM" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  [ "$(jq -s -r '.[0].payload.mode' "$RM/events.jsonl")" = "assisted" ]; ok $? "режим assisted зафиксирован в run_start"
+  local RA="$T/r-auto"; mkdir -p "$RA"; echo '{"budget":{"max_iters":3}}' > "$RA/contract.json"
+  append "$RA" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  [ "$(jq -s -r '.[0].payload.mode' "$RA/events.jsonl")" = "autonomous" ]; ok $? "по умолчанию autonomous"
+
+  # реестр: прогон в ЛЮБОМ каталоге обязан стать видимым для калибровки и статуса
+  # отдельный индекс на этот блок: в общем уже есть записи предыдущих фикстур
+  REG="$T/index-reg.jsonl"; export REDLOOP_INDEX="$REG"
+  local RX="$T/elsewhere/runs/proj-run"; mkdir -p "$RX"
+  append "$RX" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  [ "$(grep -c . "$REG")" = "1" ]; ok $? "реестр: прогон вне папки скилла зарегистрирован"
+  append "$RX" iter_done '{"task_id":"t","files_changed":1,"checkboxes_done":1}' --iter 1 --of 2 >/dev/null
+  append "$RX" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  [ "$(grep -c . "$REG")" = "1" ]; ok $? "реестр идемпотентен (повтор не плодит строк)"
+  grep -q '"path"' "$REG"; ok $? "в реестре есть абсолютный путь прогона"
+  grep -q '"task"' "$REG" ; ok $((1-$?)) "текст задачи в реестр НЕ копируется (обход секрет-гарда)"
   # guard недоступен → журнал НЕ пишется (fail-closed), а не пишется без проверки
   local G="$T/guardless"; mkdir -p "$G"
   cp "$HERE/events.sh" "$G/events.sh"

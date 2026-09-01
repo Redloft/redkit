@@ -2,7 +2,7 @@
 # test-redloop.sh — прогон всех self-тестов + сквозной smoke (контракт→промпт→журнал→детекторы→эскалация).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; fail=0
-for s in events detect contract-lint patterns compile escalate; do
+for s in events detect contract-lint patterns compile escalate watch; do
   out="$(bash "$HERE/$s.sh" --self-test 2>&1)"; rc=$?
   echo "$out" | tail -3
   [ $rc -ne 0 ] && fail=1
@@ -13,7 +13,7 @@ echo "$out" | tail -3; [ $rc -ne 0 ] && fail=1
 
 echo "--- сквозной smoke ---"
 T="$(mktemp -d)"; rd="$T/runs/run-smoke"; mkdir -p "$rd"
-export REDLOOP_STATS_DIR="$T/stats" REDLOOP_ESCALATE_DRYRUN=1
+export REDLOOP_STATS_DIR="$T/stats" REDLOOP_ESCALATE_DRYRUN=1 REDLOOP_INDEX="$T/index.jsonl"
 ok(){ if [ "$1" -eq 0 ]; then echo "  ✓ $2"; else echo "  ✗ $2"; fail=1; fi; }
 cat > "$rd/contract.json" <<'J'
 {"task":"smoke","runner":"loop","scope_globs":["src/**"],

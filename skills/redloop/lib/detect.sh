@@ -10,11 +10,16 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
 STATS="${REDLOOP_STATS_DIR:-$ROOT/stats}"; DET="$STATS/detectors.json"
+SILENCE_MIN="${REDLOOP_SILENCE_MIN:-45}"
 STALL_N="${REDLOOP_STALL_N:-3}"; LOOP_K="${REDLOOP_LOOP_K:-3}"; RETRY_N="${REDLOOP_RETRY_N:-3}"; ASK_N="${REDLOOP_ASK_N:-2}"
 
 _shadow() { # 1 = ещё в shadow (не будим человека). Неизвестный детектор → shadow (fail-safe).
+  # ⚠ НЕ `.shadow // true`: в jq оператор // считает false пустым, поэтому явный флип
+  # {"SILENCE":{"shadow":false}} молча читался бы как shadow=true — выключатель не выключал.
+  # Тот же капкан уже ловили в events.sh на strict_journal; здесь он сидел в ЧИТАТЕЛЕ.
   local d="$1"; [ -f "$DET" ] || return 0
-  [ "$(jq -r --arg d "$d" '.[$d].shadow // true' "$DET" 2>/dev/null)" = "false" ] && return 1 || return 0; }
+  local v; v="$(jq -r --arg d "$d" 'if (.[$d] // {}) | has("shadow") then (.[$d].shadow|tostring) else "true" end' "$DET" 2>/dev/null)"
+  [ "$v" = "false" ] && return 1 || return 0; }
 
 scan() {
   local DET_NAME="?"
@@ -30,13 +35,19 @@ scan() {
           --argjson sh "$(_shadow "$1" && echo true || echo false)" \
           '. + [{detector:$d, severity:$s, evidence:$e, shadow:$sh}]')"; }
 
+  # Режим прогона: assisted = человек пишет промпты сам и задаёт темп. Детекторы темпа
+  # (STALL, SILENCE) для такого прогона бессмысленны: пауза значит, что человек занят,
+  # а не что агент завис. Судить их той же меркой — гарантированные ложные тревоги.
+  local mode; mode="$(q -s -r 'map(select(.event_type=="run_start"))|.[0].payload.mode // "autonomous"')"
+  [ "$mode" = "assisted" ] || [ "$mode" = "autonomous" ] || mode="autonomous"
+
   DET_NAME=STALL
   # STALL: N подряд iter_done без изменений файлов и без прироста чекбоксов
   local stall; stall="$(q -s --argjson n "$STALL_N" '
       [.[] | select(.event_type=="iter_done")] | .[-$n:] |
       if length==$n and all(.[]; .payload.files_changed==0) and
          ((.[-1].payload.checkboxes_done) == (.[0].payload.checkboxes_done)) then 1 else 0 end')"
-  [ "$stall" = "1" ] && add STALL critical "$STALL_N итераций без изменения файлов и чекбоксов"
+  [ "$stall" = "1" ] && [ "$mode" = "autonomous" ] && add STALL critical "$STALL_N итераций без изменения файлов и чекбоксов"
 
   DET_NAME=LOOP
   # LOOP: одна и та же команда вернула negative_verdict K раз (ретрай бесполезен по существу)
@@ -99,7 +110,19 @@ scan() {
   local ask; ask="$(q -s --argjson n "$ASK_N" '[.[] | select(.event_type=="question" and .payload.allowed==false)] | length | if .>=$n then 1 else 0 end')"
   [ "$ask" = "1" ] && add ASK-STORM warn "≥$ASK_N вопросов человеку вне разрешённого списка"
 
-  # SILENCE — считает ВНЕШНИЙ сторож по heartbeat; здесь только знаменатель для отчёта
+  # SILENCE: прогон не закрыт, а событий нет дольше порога. Три прогона подряд закончились
+  # именно так — работа шла (или встала), журнал молчал, и никто не узнал.
+  # ⚠ Единственный детектор, зависящий от «сейчас»: тишину иначе не измерить.
+  DET_NAME=SILENCE
+  local sil; sil="$(q -s -r --argjson now "$(date -u +%s)" --argjson lim "$SILENCE_MIN" '
+      if ([.[] | select(.event_type=="run_done")] | length) > 0 then empty
+      else (.[-1].ts | fromdateiso8601) as $last
+        | (($now - $last) / 60 | floor) as $mins
+        | if $mins > $lim then "молчит \($mins) мин при пороге \($lim); финала нет" else empty end
+      end')"
+  [ -n "$sil" ] && [ "$mode" = "autonomous" ] && add SILENCE critical "$sil"
+
+
   # Упавший детектор виден отдельной строкой: иначе его молчание неотличимо от «чисто».
   local broke; broke="$(sort -u "$brokef" 2>/dev/null | tr '\n' ' ')"; rm -f "$brokef"
   if [ -n "${broke// /}" ]; then
@@ -110,19 +133,38 @@ scan() {
 }
 
 calibration() {
-  local runs="${REDLOOP_RUNS_DIR:-$ROOT/runs}"; local total=0 fired=0 fp=0
-  for d in "$runs"/*/; do [ -f "$d/events.jsonl" ] || continue; total=$((total+1))
-    fired=$(( fired + $(jq -s '[.[] | select(.event_type=="detector_fire")] | length' "$d/events.jsonl") ))
-    fp=$(( fp + $(jq -s '[.[] | select(.event_type=="detector_fire" and .payload.false_positive==true)] | length' "$d/events.jsonl") ))
-  done
+  # ⚠ Знаменатель берём из РЕЕСТРА, а не из одного каталога: прогоны живут и в папке скилла,
+  # и в .redloop/runs/ проектов. Пока считали по каталогу, третий живой прогон был невидим,
+  # и порог «5 прогонов» никогда не набрался бы честно.
+  local reg="${REDLOOP_INDEX:-$ROOT/runs/index.jsonl}"
+  local runs="${REDLOOP_RUNS_DIR:-$ROOT/runs}"
+  local total=0 fired=0 fp=0 missing=0 assisted=0
+  local dirs; dirs="$(mktemp)"
+  [ -f "$reg" ] && jq -r '.path' "$reg" 2>/dev/null >> "$dirs"
+  for d in "$runs"/*/; do [ -d "$d" ] && printf '%s\n' "${d%/}" >> "$dirs"; done
+  local d ev
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    ev="$d/events.jsonl"
+    if [ ! -f "$ev" ]; then missing=$((missing+1)); continue; fi
+    local m; m="$(jq -s -r 'map(select(.event_type=="run_start"))|.[0].payload.mode // "autonomous"' "$ev" 2>/dev/null || echo autonomous)"
+    if [ "$m" = "assisted" ]; then assisted=$((assisted+1)); continue; fi
+    total=$((total+1))
+    fired=$(( fired + $(jq -s '[.[] | select(.event_type=="detector_fire")] | length' "$ev" 2>/dev/null || echo 0) ))
+    fp=$(( fp + $(jq -s '[.[] | select(.event_type=="detector_fire" and .payload.false_positive==true)] | length' "$ev" 2>/dev/null || echo 0) ))
+  done < <(sort -u "$dirs")
+  rm -f "$dirs"
   local rate="n/a"; [ "$fired" -gt 0 ] && rate="$(awk -v a=$fp -v b=$fired 'BEGIN{printf "%.0f%%", 100*a/b}')"
   jq -nc --argjson runs "$total" --argjson fired "$fired" --argjson fp "$fp" --arg rate "$rate" \
-    '{runs:$runs, fires:$fired, false_positives:$fp, fp_rate:$rate,
+     --argjson missing "$missing" --argjson assisted "$assisted" \
+    '{runs_autonomous:$runs, runs_assisted:$assisted, fires:$fired, false_positives:$fp,
+      fp_rate:$rate, unreadable:$missing,
       exit_shadow_allowed: ($runs>=5 and $fired>0 and ($fp*10) < $fired)}'
 }
 
 self_test() {
   set +e; local T; T="$(mktemp -d)"; local rd="$T/r1"; mkdir -p "$rd"; local fail=0
+  export REDLOOP_INDEX="$T/index.jsonl"   # боевой реестр не трогаем
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   E(){ bash "$HERE/events.sh" append "$rd" "$@" >/dev/null 2>&1; }
   E run_start '{"runner":"loop","contract_sha":"a"}'
@@ -207,6 +249,38 @@ open(p,"w").write("".join(json.dumps(r,ensure_ascii=False)+"\n" for r in rows))
 PYY
   printf '%s' "$(scan "$rd8")" | jq -e 'any(.[]; .detector=="BUDGET-OVERRUN" and (.evidence|test("180 мин из 10")))' >/dev/null
   ok $? "И2: перебор по ВРЕМЕНИ пойман (ветка over_t)"
+
+  # флип из тихого режима обязан РАБОТАТЬ (jq // считает false пустым — уже ловили дважды)
+  local SD="$T/stats"; mkdir -p "$SD"; echo '{"STALL":{"shadow":false}}' > "$SD/detectors.json"
+  printf '%s' "$(REDLOOP_STATS_DIR="$SD" DET="$SD/detectors.json" STATS="$SD" scan "$rd")" \
+    | jq -e 'any(.[]; .detector=="STALL" and .shadow==false)' >/dev/null
+  ok $? "флип shadow=false реально выводит детектор из тихого режима"
+
+  # SILENCE: живой прогон без финала, последнее событие давно
+  # assisted: тот же молчащий журнал НЕ даёт тревоги — темп задаёт человек
+  local rdA="$T/rA"; mkdir -p "$rdA"; echo '{"mode":"assisted"}' > "$rdA/contract.json"
+  bash "$HERE/events.sh" append "$rdA" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  local m2; for m2 in 1 2 3; do bash "$HERE/events.sh" append "$rdA" iter_done '{"task_id":"t","files_changed":0,"checkboxes_done":0}' --iter $m2 --of 5 >/dev/null; done
+  printf '%s' "$(scan "$rdA")" | jq -e 'all(.[]; .detector!="STALL" and .detector!="SILENCE")' >/dev/null
+  ok $? "assisted: детекторы темпа молчат (промпты пишет человек)"
+
+  local rd9="$T/r9"; mkdir -p "$rd9"
+  bash "$HERE/events.sh" append "$rd9" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null
+  bash "$HERE/events.sh" append "$rd9" iter_done '{"task_id":"t","files_changed":1,"checkboxes_done":1}' --iter 1 --of 9 >/dev/null
+  printf '%s' "$(scan "$rd9")" | jq -e 'all(.[]; .detector!="SILENCE")' >/dev/null
+  ok $? "SILENCE: свежий прогон молчанием не считается"
+  python3 - "$rd9/events.jsonl" <<'PYY'
+import json,sys,datetime
+p=sys.argv[1]; rows=[json.loads(l) for l in open(p) if l.strip()]
+t=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-datetime.timedelta(hours=2)
+rows[-1]["ts"]=t.strftime("%Y-%m-%dT%H:%M:%SZ")
+open(p,"w").write("".join(json.dumps(r,ensure_ascii=False)+"\n" for r in rows))
+PYY
+  printf '%s' "$(scan "$rd9")" | jq -e 'any(.[]; .detector=="SILENCE" and (.evidence|test("при пороге 45")))' >/dev/null
+  ok $? "SILENCE: два часа тишины без финала пойманы, порог в тексте"
+  bash "$HERE/events.sh" append "$rd9" run_done '{"verdict":"partial","iters":1,"interventions":0}' >/dev/null
+  printf '%s' "$(scan "$rd9")" | jq -e 'all(.[]; .detector!="SILENCE")' >/dev/null
+  ok $? "SILENCE: закрытый прогон молчит законно"
 
   # изоляция: битая строка в журнале не должна гасить остальные детекторы
   local rd7="$T/r7"; mkdir -p "$rd7"

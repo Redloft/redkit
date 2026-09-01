@@ -195,6 +195,7 @@ def _self_test():
         run(rd, "run_done", '{"verdict":"partial","iters":1,"interventions":0}')
         return rd
     tmp = tempfile.mkdtemp()
+    os.environ["REDLOOP_INDEX"] = os.path.join(tmp, "index.jsonl")   # боевой реестр не трогаем
     try:
         # была зелёной, стала красной — карточка обязана показать красную, а не «завершён»
         rd = fixture(tmp, "regress", ['{"check_id":"a","cmd_hash":"h","exit_code":0}',

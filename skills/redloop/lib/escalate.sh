@@ -30,9 +30,13 @@ escalate() {
       '{run_id:$rid, reason_code:$rc, attempts:$att, needs:$needs, diagnosis:$diag, suggested_action:$sugg, ts:$ts}')"
 
   printf '%s\n' "$payload" >> "$rd/escalations.log"           # durable пол
+  # Внешний сторож НЕ дописывает в журнал прогона: событие сдвинуло бы .[-1].ts, на который
+  # опирается сам детектор тишины, и сигнал стирал бы себя. Для него — только свой alerts.jsonl.
+  if [ "${REDLOOP_ESCALATE_NO_EVENT:-0}" != "1" ]; then
   bash "$HERE/events.sh" append "$rd" escalation \
      "$(jq -nc --arg rc "$reason" --argjson n "$(printf '%s' "$payload" | jq .needs)" '{reason_code:$rc, needs:$n}')" \
      --severity critical >/dev/null 2>&1 || true
+  fi
 
   local tg="skipped"
   if [ "${REDLOOP_ESCALATE_DRYRUN:-0}" = "1" ]; then tg="dryrun"
@@ -57,6 +61,7 @@ escalate() {
 
 self_test() {
   set +e; export REDLOOP_ESCALATE_DRYRUN=1; local T; T="$(mktemp -d)"; local rd="$T/run-x"; mkdir -p "$rd"; local fail=0
+  export REDLOOP_INDEX="$T/index.jsonl"   # боевой реестр не трогаем
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   local out; out="$(escalate "$rd" STALL "unblock,review" "3 итерации без правок" "переформулировать задачу")"; ok $? "валидная эскалация"
   printf '%s' "$out" | jq -e '.reason_code=="STALL"' >/dev/null; ok $? "reason_code в payload"
