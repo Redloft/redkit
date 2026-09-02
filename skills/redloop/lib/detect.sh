@@ -150,6 +150,16 @@ calibration() {
     local m; m="$(jq -s -r 'map(select(.event_type=="run_start"))|.[0].payload.mode // "autonomous"' "$ev" 2>/dev/null || echo autonomous)"
     if [ "$m" = "assisted" ]; then assisted=$((assisted+1)); continue; fi
     total=$((total+1))
+    # ⚠ Находки живут в alerts.jsonl (их пишет сторож), а не событиями в журнале. Пока
+    # калибровка считала detector_fire в events.jsonl, она всегда видела ноль — и порог
+    # выхода из тихого режима был недостижим В ПРИНЦИПЕ. Считаем НАХОДКИ (строки), а не
+    # повторы: одна и та же находка на 100 обходах — один факт, а не сто улик.
+    local al="$d/alerts.jsonl"
+    if [ -f "$al" ]; then
+      fired=$(( fired + $(jq -s '[.[] | select(.suppressed_count // 0 == 0 or (.seen_count // 1) > (.suppressed_count // 0))] | length' "$al" 2>/dev/null || echo 0) ))
+      fp=$(( fp + $(jq -s '[.[] | select(.false_positive==true)] | length' "$al" 2>/dev/null || echo 0) ))
+    fi
+    # legacy: событийные detector_fire, если их кто-то писал раньше
     fired=$(( fired + $(jq -s '[.[] | select(.event_type=="detector_fire")] | length' "$ev" 2>/dev/null || echo 0) ))
     fp=$(( fp + $(jq -s '[.[] | select(.event_type=="detector_fire" and .payload.false_positive==true)] | length' "$ev" 2>/dev/null || echo 0) ))
   done < <(sort -u "$dirs")

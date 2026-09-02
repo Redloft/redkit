@@ -53,11 +53,44 @@ _alive_since() {   # печатает минуты с последней РЕА�
 
 _alert_delivered() {  # «уже сообщали» = ДОСТАВЛЕНО человеку, а не «мы что-то записали».
   # Прежняя версия считала виденной любую запись, включая подавленную и недоставленную:
-  # первая же suppressed-строка или один сбой TG навсегда гасили тревогу по этому прогону —
-  # ровно тот исход, против которого весь сторож и писался.
+  # первая же suppressed-строка или один сбой TG навсегда гасили тревогу по этому прогону.
   local rd="$1" det="$2"
   [ -f "$rd/alerts.jsonl" ] || return 1
   jq -e --arg d "$det" -s 'any(.[]; .detector==$d and .delivered==true)' "$rd/alerts.jsonl" >/dev/null 2>&1
+}
+
+# ⚠ ОДНА строка на (прогон × детектор), а не строка на обход. Первая версия писала находку
+# каждые 15 минут: за сутки 100 одинаковых записей на прогон и рост без предела. Повтор той же
+# находки — не новая улика, это тот же факт; поэтому копим СЧЁТЧИК, а не строки.
+_alert_upsert() {
+  local rd="$1" det="$2" sev="$3" ev="$4" sh="$5" dl="$6" sup="$7"
+  local f="$rd/alerts.jsonl"; local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local tmp; tmp="$(mktemp)"
+  if [ -f "$f" ]; then
+    jq -s -c --arg d "$det" --arg sev "$sev" --arg ev "$ev" --arg now "$now" \
+       --argjson sh "$sh" --argjson dl "$dl" --argjson sup "$sup" '
+      (map(select(.detector==$d)) | length) as $has
+      | if $has > 0 then
+          map(if .detector==$d then
+                . + {last_ts:$now, evidence:$ev, severity:$sev, shadow:$sh,
+                     seen_count: ((.seen_count // 1) + 1),
+                     suppressed_count: ((.suppressed_count // 0) + $sup),
+                     delivered: (.delivered or $dl)}
+                + (if $dl and (.delivered_ts|not) then {delivered_ts:$now} else {} end)
+              else . end)
+        else
+          . + [{ts:$now, last_ts:$now, detector:$d, severity:$sev, evidence:$ev, source:"watch",
+                 shadow:$sh, delivered:$dl, seen_count:1, suppressed_count:$sup}
+               + (if $dl then {delivered_ts:$now} else {} end)]
+        end
+      | .[]' "$f" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  else
+    jq -nc --arg d "$det" --arg sev "$sev" --arg ev "$ev" --arg now "$now" \
+       --argjson sh "$sh" --argjson dl "$dl" --argjson sup "$sup" \
+      '{ts:$now, last_ts:$now, detector:$d, severity:$sev, evidence:$ev, source:"watch",
+        shadow:$sh, delivered:$dl, seen_count:1, suppressed_count:$sup}' > "$tmp"
+  fi
+  mv "$tmp" "$f"
 }
 
 watch_once() {
@@ -80,15 +113,13 @@ watch_once() {
       if [ "$det" = "SILENCE" ]; then
         local idle; idle="$(_alive_since "$d")"
         if [ -n "$idle" ] && [ "$idle" -lt "${REDLOOP_SILENCE_MIN:-45}" ]; then
-          jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg e "$ev" --argjson idle "$idle" \
-            '{ts:$ts, detector:"SILENCE", severity:"info", evidence:$e, source:"watch",
-              suppressed:true, delivered:false, reason:"проект жив", idle_min:$idle}' >> "$d/alerts.jsonl"
+          _alert_upsert "$d" SILENCE info "$ev (подавлено: проект жив, простой ${idle} мин)" true false 1
           suppressed=$((suppressed+1)); continue
         fi
       fi
       local delivered=false
       if [ "$sh" = "true" ]; then
-        # тихий режим: находку ФИКСИРУЕМ (это и есть материал для калибровки), человека не будим
+        # тихий режим: находку ФИКСИРУЕМ (материал для калибровки), человека не будим
         shadowed=$((shadowed+1))
       elif [ "$DRY" = "1" ]; then
         # сухой прогон: считаем доставленной (иначе счётчик доставок всегда ноль и строка врёт)
@@ -102,10 +133,7 @@ watch_once() {
           echo "⚠ не доставлено ($det, прогон $(basename "$d")) — повторю на следующем обходе" >&2
         fi
       fi
-      jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$det" --arg s "$sev" --arg e "$ev" \
-        --argjson sh "$sh" --argjson dl "$delivered" \
-        '{ts:$ts, detector:$d, severity:$s, evidence:$e, source:"watch", shadow:$sh, delivered:$dl}' \
-        >> "$d/alerts.jsonl"
+      _alert_upsert "$d" "$det" "$sev" "$ev" "$sh" "$delivered" 0
     done < <(printf '%s' "$sigs" | jq -r '.[] | [.detector,.severity,.evidence,(.shadow|tostring)] | @tsv')
   done < <(jq -r '.path' "$REG" 2>/dev/null | sort -u)
   # знаменатель обязателен, и подавленные тревоги считаются отдельно: «0 тревог» без
@@ -153,7 +181,8 @@ PYY
   printf 'свежая работа\n' > "$T/proj/файл.txt"
   out="$(watch_once)"
   echo "$out" | grep -q "подавлено (проект жив) 1"; ok $? "живой проект: SILENCE подавлен, а не выдан за смерть"
-  grep -q '"suppressed":true' "$rl/alerts.jsonl"; ok $? "подавленная тревога записана (видна в разборе)"
+  jq -e -s 'any(.[]; .detector=="SILENCE" and (.suppressed_count // 0) > 0 and .delivered==false)' "$rl/alerts.jsonl" >/dev/null
+  ok $? "подавление записано счётчиком и не выдано за доставку"
   # тихий детектор ФИКСИРУЕТСЯ (иначе не накопит эмпирику и не выйдет из shadow по числам)
   local rs="$T/runs/shadowed"; mkdir -p "$rs"
   echo '{}' > "$REDLOOP_STATS_DIR/detectors.json"     # всё в тихом режиме
@@ -164,6 +193,12 @@ PYY
   grep -q '"shadow":true' "$rs/alerts.jsonl"; ok $? "в alerts видно, что находка тихая"
   grep -q '"delivered":false' "$rs/alerts.jsonl"; ok $? "тихая находка помечена недоставленной"
   out="$(watch_once)"; echo "$out" | grep -q "тихий режим 1"; ok $? "тихая находка повторяется, а не гасится дедупом"
+  [ "$(jq -s 'length' "$rs/alerts.jsonl")" = "1" ]; ok $? "повтор НЕ плодит строк — одна на детектор"
+  [ "$(jq -s -r '.[0].seen_count' "$rs/alerts.jsonl")" = "2" ]; ok $? "повтор считается счётчиком (seen_count=2)"
+  jq -e -s '.[0]|has("last_ts")' "$rs/alerts.jsonl" >/dev/null; ok $? "у находки есть время последнего повтора"
+  # калибровка обязана ВИДЕТЬ эти находки: они и есть материал для выхода из тихого режима
+  [ "$(REDLOOP_INDEX="$REDLOOP_INDEX" bash "$HERE/detect.sh" calibration | jq -r .fires)" != "0" ]
+  ok $? "калибровка читает находки из alerts.jsonl (а не пустой detector_fire)"
   echo '{"SILENCE":{"shadow":false}}' > "$REDLOOP_STATS_DIR/detectors.json"
 
   # подавленная тревога НЕ считается «уже сообщали»: проект затих → тревога обязана уйти
