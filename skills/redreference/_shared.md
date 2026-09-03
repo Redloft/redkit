@@ -109,9 +109,9 @@ Recency-weighted (свежие раунды весомее). Снапшот по
 
 ---
 
-## §5. redloft-совместимый выход (Stage E)
+## §5. Выход для внешнего оркестратора (Stage E)
 
-Workflow Return Contract: `{ run_id, status, captures_path, taste_profile|null, reference_likes_md, rounds_completed, stop_reason:enum }`. `taste_profile:null` — sentinel «нечего мёржить» (Design работает как сейчас). Caller redloft-стадии **валидирует обязательные поля+enum**; битый payload → abort + `taste_merge_failed`, visual-taste не трогается. **Backup-before-write**: `cp visual-taste-profile.json .bak` → `.tmp` → validate → atomic `mv`; ошибка → restore. Маппинг: `taste-profile.json` → `references[]`/`anti_references[]`/`palette`/`mood`; top-cards → `reference-likes.md`. Мёрдж **под flock**, не перезапись (Briefing уже создаёт каркас).
+Workflow Return Contract: `{ run_id, status, captures_path, taste_profile|null, reference_likes_md, rounds_completed, stop_reason:enum }`. `taste_profile:null` — sentinel «нечего мёржить» (Design работает как сейчас). Caller вызывающей стадии **валидирует обязательные поля+enum**; битый payload → abort + `taste_merge_failed`, visual-taste не трогается. **Backup-before-write**: `cp visual-taste-profile.json .bak` → `.tmp` → validate → atomic `mv`; ошибка → restore. Маппинг: `taste-profile.json` → `references[]`/`anti_references[]`/`palette`/`mood`; top-cards → `reference-likes.md`. Мёрдж **под flock**, не перезапись (Briefing уже создаёт каркас).
 
 ---
 

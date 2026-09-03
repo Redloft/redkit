@@ -106,6 +106,26 @@ else
   echo "      cp core/publish-gate.names.example core/publish-gate.names и заполни"
 fi
 
+# ── 2.5. Закрытые пути: что решено НЕ публиковать вообще ──────────────────
+# Решение 03.09.2026: skills/redloft — собственная методика агентства (пайплайн
+# «идея → ТЗ на сайт»), из публичного доступа изъята. Разовой чистки мало:
+# синк канон→redkit вернёт каталог обратно молча (канон и репо расходятся в обе
+# стороны). Поэтому запрет живёт МЕХАНИЗМОМ здесь, а не памятью человека.
+# Список путей — core/publish-gate.deny (glob на строку, # — комментарий).
+DENY_FILE="core/publish-gate.deny"
+if [ -f "$DENY_FILE" ]; then
+  : > "$TMP/denyhits"
+  while IFS= read -r pat; do
+    case "$pat" in ''|\#*) continue ;; esac
+    while IFS= read -r f; do
+      case "$f" in $pat) echo "$f: закрытый путь ($pat)" >> "$TMP/denyhits" ;; esac
+    done < "$LIST"
+  done < "$DENY_FILE"
+  report "закрытые пути (публикации не подлежат)" "$TMP/denyhits"
+else
+  echo "  ⚠️  закрытые пути: нет $DENY_FILE — проверка ПРОПУЩЕНА"
+fi
+
 # ── 3. Публичные IP: находим все, затем вычитаем частные диапазоны ────────
 : > "$TMP/hits"
 while IFS= read -r f; do

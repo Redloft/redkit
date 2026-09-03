@@ -4,7 +4,7 @@ Standalone-скилл сбора семантики: из бизнес-ядра 
 
 ## Запуск
 - Standalone: `/redsemantic "<ниша> <гео>" [--region <гео>] [--mode lite|standard|heavy]`
-- В составе redloft: автоматически как стадия `semantic` после planning/R1, до sitemap.
+- В составе внешнего site-оркестратора: автоматически как стадия `semantic`.
 
 ## Раскладка
 ```

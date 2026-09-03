@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /*
- * export-redloft.js — map a redreference run's taste into redloft's Phase-6
+ * export-taste.js — map a redreference run's taste into the site-orchestrator's design stage
  * artifacts (plan Stage E / §5). MERGES into an existing visual-taste-profile.json
  * (does NOT overwrite tone/palette/typography/composition set in Briefing) and
  * (re)writes reference-likes.md. Atomicity/flock/backup are the wrapper's job
- * (export-redloft.sh); this is the pure transform.
+ * (export-taste.sh); this is the pure transform.
  *
  * Enriches:
  *   references[]      ← liked cards   { url, liked:<comment|UX/UI summary>, tokens:{} }
@@ -12,7 +12,7 @@
  *   mood[]            ← liked_keywords_common (shared aesthetic vocabulary)
  * Preserves everything else from the existing profile.
  *
- * Usage: export-redloft.js <run_dir> <existing_visual_taste.json|-> <out_json.tmp> <out_md>
+ * Usage: export-taste.js <run_dir> <existing_visual_taste.json|-> <out_json.tmp> <out_md>
  *   existing path "-" or missing → start from {}.
  */
 'use strict';
@@ -20,7 +20,7 @@ const fs = require('fs');
 const path = require('path');
 
 const [runDir, existingPath, outJson, outMd] = process.argv.slice(2);
-if (!runDir || !outJson || !outMd) { console.error('usage: export-redloft.js <run_dir> <existing|-> <out_json> <out_md>'); process.exit(64); }
+if (!runDir || !outJson || !outMd) { console.error('usage: export-taste.js <run_dir> <existing|-> <out_json> <out_md>'); process.exit(64); }
 
 function readJson(p, def) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return def; } }
 function readJsonl(p) {

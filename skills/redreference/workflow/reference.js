@@ -31,7 +31,7 @@ export const meta = {
     { title: 'Curate', detail: 'дедуп, ранжирование, добор разнообразия для раунда' },
     { title: 'Page',   detail: 'build-page.sh → локальная HTML + feedback-server (caller)' },
     { title: 'Round',  detail: 'приём фидбэка → WAL commit → пересчёт taste-profile → query-expansion' },
-    { title: 'Render', detail: 'taste-profile.json + reference-likes.md (redloft-совместимо)' },
+    { title: 'Render', detail: 'taste-profile.json + reference-likes.md' },
   ],
 }
 

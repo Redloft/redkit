@@ -35,8 +35,8 @@
 **Защита:** `wal_recover` на старте авто-ребилдит из `phases/round-*.committed.jsonl` при `committed>anchor` или несовпадении счётчиков (`INDEX_REBUILT`).
 **Действие вручную:** `manage.sh rebuild-index <slug>` — пересобирает `captures.jsonl`/`feedback.jsonl`/`captures-index.json` из committed-раундов (single source of truth = `status.last_committed_round`).
 
-## 7. Stage E: битый payload при мёрже в redloft
-**Симптом:** `export-redloft.sh` → `TASTE_MERGE_FAILED`.
+## 7. Stage E: битый payload при мёрже во внешний профиль
+**Симптом:** `export-taste.sh` → `TASTE_MERGE_FAILED`.
 **Защита:** merged JSON валидируется (`jq -e`) ДО записи; `visual-taste-profile.json` не трогается при ошибке; перед записью делается `.bak`.
 **Действие:** target цел (Design идёт на брифинг-профиле). Если `.bak` остался от прошлой удачной записи и текущий target подозрителен — `cp visual-taste-profile.json.bak visual-taste-profile.json`. 0 лайков → `TASTE_EMPTY` (норма, не ошибка — мёрж пропущен намеренно).
 

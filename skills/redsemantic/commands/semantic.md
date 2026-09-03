@@ -30,4 +30,4 @@
 | `/redsemantic-cleanup [--older-than 30d]` | `manage.sh cleanup` |
 
 ## Как redloft вызывает (reuse)
-redloft `landing-builder.js` запускает стадию `semantic` через `agent()` с reuseSkill-строкой — суб-агент исполняет этот пайплайн и возвращает `{artifact_type:'semantic', key_claims, body_md}`. Вход: brief+research+planning (key_claims). См. `redloft/_shared.md §8`.
+Внешний site-оркестратор запускает стадию `semantic` через `agent()` с reuseSkill-строкой — суб-агент исполняет этот пайплайн и возвращает `{artifact_type:'semantic', key_claims, body_md}`.

@@ -1,7 +1,7 @@
 # redwork — MVP spec v3 (после plan-review #1+#2; архитектурные critical закрыты, готов к сборке)
 
 Оркестратор полного цикла задачи: implement→test-gate→finalize→deploy→post-verify. Тонкая стейт-машина
-(как redloft гоняет стадии), **переиспользует** существующие команды (`plan-panel`/`/finalize`/`audit-site`/
+(как это делает внешний site-оркестратор), **переиспользует** существующие команды (`plan-panel`/`/finalize`/`audit-site`/
 `run`/`verify`/`tracker`). Драйв `/loop` self-paced, резюм из state.json. MVP = Phase 2–6 (план — вход).
 
 Статус замысла: 2 раунда plan-review. Раунд 1 → закрыты state-versioning, concurrency, secrets-в-state,

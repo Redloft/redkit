@@ -83,7 +83,7 @@ v2 закрыл только SSRF, но `keyword='$(...)'` через bash-ин�
 ## Per-skill интеграция (без изменений по сути; gated по `--probe`)
 
 1. **redsemantic** (приоритет 1): harvest += `overview` (Google-объёмы 2-й живой источник к Wordstat) + `ranked <competitor>`; cluster += `serp`-overlap + `intent`; structure += PAA→FAQ + difficulty→приоритет. Затрагивает `roles/{harvester,clusterer,architect}.md` + `workflow/semantic.js` (+ прокид `DFS_RUN_ID`).
-2. **redloft → стадия `seo`** (приоритет 2): `serp_competitors` + `ranked` + `difficulty`. Новый `redloft/stages/seo/prompt.md` + envelope.
+2. **внешний site-оркестратор → стадия `seo`** (приоритет 2): `serp_competitors` + `ranked` + `difficulty`.
 3. **audit-site** (приоритет 2): On-Page (тех-SEO глубже Lighthouse) + AI Optimization (GEO-**результат**) + SERP rank-tracking. Gated.
 4. **anthropic-skills:seo** (приоритет 3): тот же набор; **не дублировать** с audit-site — общий adapter-core, разные потребители (resolved: дублируется только тонкий вызов, логика в адаптере).
 5. **redresearch** (приоритет 3): SERP source-discovery (доп. к firecrawl) + Business Data + Domain Analytics. `roles/source-hunter.md`.
@@ -104,7 +104,7 @@ v2 закрыл только SSRF, но `keyword='$(...)'` через bash-ин�
 - **Phase 1 — adapter-core** (декомпозировано, v3): **1a** `docs/adapter-contract.md` (envelope+cost-log+коды) · **1b** `dataforseo.sh` core: `_call()` + netrc + `_validate_input` (injection) + SSRF + exit-семантика + envelope + методы + `--probe` + бэк-компат + kill-switch · **1c** cost-cap (mkdir-lock per-run count+$ / global daily hard) + кэш (sha256, TTL, slug-изоляция PII, chmod700) + fixtures (`DFS_FIXTURE_DIR`/`--record`) · **1d** hermetic-тесты + обновить consumers (harvester role) + бэкап v1 + smoke. Acceptance (hermetic, до Phase 0): `DFS_MAX_CALLS=1`→2-й падает; 60 параллельных при cap=50→ровно 50; `keyword='$(id)'` режется; SSRF-URL блок; `ps aux` без кредов; smoke зелёный.
 - **Phase 2a** — redsemantic: `overview` + `ranked` в harvest (минимальный adapter-add). Обновить dryrun (canned методы via fixture).
 - **Phase 2b** — redsemantic: SERP-overlap кластеризация как новая post-harvest стадия в `semantic.js` (отдельная сессия).
-- **Phase 3** — audit-site + redloft seo: On-Page + ai-vis + competitors.
+- **Phase 3** — audit-site + seo-стадия оркестратора: On-Page + ai-vis + competitors.
 - **Phase 4** — redresearch + anthropic seo: SERP-discovery, Business Data (+ **PII-страйп** отзывов из кэша — gap data-роли).
 - **Phase 5** — domain-check (опц./skip).
 

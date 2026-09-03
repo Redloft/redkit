@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Acceptance-метрика relevance-gate: доля niche-anchored ключей + доля шума.
-# Воспроизводимо считает «до/после» (как мерили redloft-agency: 22% anchored / 22% шум).
+# Воспроизводимо считает «до/после» (как мерили на агентском корпусе: 22% anchored / 22% шум).
 # Usage: niche-share.sh <keyword_universe.jsonl> "<anchors|regex>" "<stops|regex>"
 # Пример: niche-share.sh run/keyword_universe.jsonl 'бан[ья]|банн|сауна|спа|терм|парил' 'банк|сбербанк|гостиниц|отел|коворкинг|вакансии'
 set -u

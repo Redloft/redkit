@@ -9,7 +9,7 @@ description: |
   • "build a keyword universe for X", "semantic core / keyword clustering for X", "search intent map for X"
   • Explicit: «/redsemantic», «/redsemantic-status», «/redsemantic-list», «/redsemantic-resume»
 
-  Встраивается в redloft как стадия ПОСЛЕ planning, ДО sitemap (семантика диктует структуру).
+  Встраивается во внешний site-оркестратор как отдельная стадия (семантика диктует структуру).
   НЕ для: одиночного «загугли частотность слова» (→ прямой адаптер), генерации текстов (→ content-gen), ресерча рынка без семантики (→ redresearch).
 allowed-tools:
   - Bash
@@ -23,12 +23,12 @@ allowed-tools:
 
 # redsemantic — Semantic Intelligence (SEO-мозг)
 
-Та же модель, что `redresearch`/`redloft`: оркестратор не работает сам, а гоняет детерминированный пайплайн стадий-агентов (Workflow-скрипт) с внутренним judge. **Семантика диктует структуру сайта** — это принципиальный порядок (сначала спрос, потом карта).
+Та же модель, что `redresearch`: оркестратор не работает сам, а гоняет детерминированный пайплайн стадий-агентов (Workflow-скрипт) с внутренним judge. **Семантика диктует структуру сайта** — это принципиальный порядок (сначала спрос, потом карта).
 
 ## Flow
 
 ```
-/redsemantic «банный комплекс Москва»  (или вызов из redloft после planning)
+/redsemantic «банный комплекс Москва»  (или вызов из внешнего site-оркестратора)
    ↓
 Phase 0 — SCOPE   нормализация ядра + region_code + probe живых адаптеров
    ↓
@@ -70,9 +70,9 @@ RENDER → keyword_universe.jsonl · clusters.json · structure.json · content_
 
 `workflow/semantic.js` — Workflow tool-скрипт (не bash напрямую). Caller-контракт (persist → probe → init → launch → write artifacts) — `commands/semantic.md`. Управление — `lib/manage.sh` (list/status/path/cleanup).
 
-## Встраивание в redloft
+## Встраивание во внешний оркестратор
 
-redloft гоняет это как стадию `semantic` (♻️-reuse, как `research`→redresearch) **после planning/R1, до sitemap**. Возвращает `artifact_type=semantic` + key_claims; стадия `sitemap` строит карту ИЗ этих кластеров, `seo` применяет on-page/GEO. См. `redloft/_shared.md §8`.
+Внешний site-оркестратор гоняет это как стадию `semantic` (♻️-reuse, как `research`→redresearch). Возвращает `artifact_type=semantic` + key_claims, которые потребляет вызывающая сторона.
 
 ## Не забывать
 - **Петля самоулучшения (push):** каждый прогон пишет `learnings.entry.json` (meta-критик: системные пробелы процесса). Caller (`commands/semantic.md` шаг 6) делает `ledger.sh append ~/.claude/skills/redsemantic`; при накоплении Stop-hook `solidify-nudge.sh` нудит на `solidify.sh scan`.

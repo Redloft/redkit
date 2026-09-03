@@ -223,7 +223,7 @@ DUP=$(jq -r '.ref_url' "$LR2" 2>/dev/null | grep -c 'd.com' || true)
 IDMIN=$(jq -s 'min_by(.id).id' "$LR2" 2>/dev/null)
 [ "${IDMIN:-0}" -ge 5 ] && ok "r2 global ids continue (>=5, no collision with r1)" || bad "r2 ids collide (min=$IDMIN)"
 
-echo "── 12. Stage E: export to redloft (merge + backup + graceful) ──"
+echo "── 12. Stage E: export to orchestrator (merge + backup + graceful) ──"
 # self-contained run with real likes (captures + feedback written directly)
 EXRUN="$TMP/data/runs/export-run"; mkdir -p "$EXRUN/captures"
 printf '%s\n' \
@@ -235,7 +235,7 @@ printf '%s\n' \
 node "$LIB/taste.js" update "$EXRUN" 1 >/dev/null 2>&1
 VTP="$TMP/vtp.json"; RLM="$TMP/reference-likes.md"
 printf '%s' '{"schema_version":1,"tone":"тёмный премиум","palette":{"bg":"#1A1715","accent":"#C9A36A"},"typography":{"heading":"serif"},"mood":["вечер в лесу"],"references":[{"url":"https://client-fav.example.com/","liked":"палитра","tokens":{}}],"anti_references":["глянцевый спа"]}' > "$VTP"
-bash "$LIB/export-redloft.sh" "$EXRUN" "$VTP" "$RLM" >/dev/null 2>&1
+bash "$LIB/export-taste.sh" "$EXRUN" "$VTP" "$RLM" >/dev/null 2>&1
 PRESERVED=$(jq -r '.tone' "$VTP" 2>/dev/null)
 [ "$PRESERVED" = "тёмный премиум" ] && [ "$(jq -r '.palette.bg' "$VTP")" = "#1A1715" ] && ok "export preserves briefing tone/palette (merge, not overwrite)" || bad "export overwrote briefing fields"
 KEPT=$(jq -e '.references[]|select(.url=="https://client-fav.example.com/")' "$VTP" >/dev/null 2>&1 && echo y)
@@ -247,7 +247,7 @@ grep -q 'Reference-likes' "$RLM" 2>/dev/null && grep -q 'Сводка' "$RLM" &&
 EMPTY_RUN="$TMP/data/runs/empty-run"; mkdir -p "$EMPTY_RUN/captures"
 printf '%s' '{"schema_version":1,"likes":0}' > "$EMPTY_RUN/captures/taste-profile.json"
 B=$(shasum "$VTP" | cut -d' ' -f1)
-bash "$LIB/export-redloft.sh" "$EMPTY_RUN" "$VTP" "$RLM" >/dev/null 2>&1
+bash "$LIB/export-taste.sh" "$EMPTY_RUN" "$VTP" "$RLM" >/dev/null 2>&1
 A=$(shasum "$VTP" | cut -d' ' -f1)
 [ "$B" = "$A" ] && ok "0-likes → target untouched (graceful TASTE_EMPTY)" || bad "0-likes modified target"
 
@@ -322,7 +322,7 @@ S2=$(node "$LIB/taste.js" stop "$P2RUN" 3 --committed-rounds 2,3 2>/dev/null)
 [ "$S2" = "zero_like_streak" ] && ok "stop: two committed rounds, no likes → zero_like_streak" || bad "stop=$S2"
 # P4b export: preferences carried into visual-taste-profile (additive); injection-safe note
 echo '{"tone":"warm","palette":{"bg":"#fff"}}' > "$TMP/vtp2.json"
-bash "$LIB/export-redloft.sh" "$P2RUN" "$TMP/vtp2.json" "$TMP/rl2.md" >/dev/null 2>&1 || node "$LIB/export-redloft.js" "$P2RUN" "$TMP/vtp2.json" "$TMP/vtp2.out.json" "$TMP/rl2.md" >/dev/null 2>&1
+bash "$LIB/export-taste.sh" "$P2RUN" "$TMP/vtp2.json" "$TMP/rl2.md" >/dev/null 2>&1 || node "$LIB/export-taste.js" "$P2RUN" "$TMP/vtp2.json" "$TMP/vtp2.out.json" "$TMP/rl2.md" >/dev/null 2>&1
 VTPOUT="$TMP/vtp2.json"; [ -f "$TMP/vtp2.out.json" ] && VTPOUT="$TMP/vtp2.out.json"
 jq -e '.preferences[]|select(.axis=="motion")' "$VTPOUT" >/dev/null 2>&1 && jq -e '.tone=="warm"' "$VTPOUT" >/dev/null 2>&1 && ok "export: preferences carried + briefing fields preserved" || bad "export dropped preferences or briefing"
 

@@ -1,7 +1,7 @@
 ---
 name: redreference
 description: |
-  Use when user wants to discover and curate website/design references with a taste-feedback loop — подбор «крутых рефов» по нише/брифу/пожеланиям с пошаговым исследованием вкуса. Standalone, и встраивается в redloft (питает Phase 1 Research и Phase 6 Design: visual-taste-profile.json + reference-likes.md). Ищет по галереям (Are.na, OnePageLove, Awwwards, Behance, Land-book + design-inspiration MCP), собирает локальную интерактивную HTML-страницу (скриншот + ссылки + like/dislike + оценка 1-10), фиксирует ответы и итеративно копает похожие. Local-first: artifacts в ~/Library/Application Support/redreference/. Та же модель, что redresearch/redloft (Workflow tool + роли + caller-persist).
+  Use when user wants to discover and curate website/design references with a taste-feedback loop — подбор «крутых рефов» по нише/брифу/пожеланиям с пошаговым исследованием вкуса. Standalone, и встраивается во внешний site-оркестратор (отдаёт visual-taste-profile.json + reference-likes.md). Ищет по галереям (Are.na, OnePageLove, Awwwards, Behance, Land-book + design-inspiration MCP), собирает локальную интерактивную HTML-страницу (скриншот + ссылки + like/dislike + оценка 1-10), фиксирует ответы и итеративно копает похожие. Local-first: artifacts в ~/Library/Application Support/redreference/. Та же модель, что redresearch (Workflow tool + роли + caller-persist).
 
   TRIGGER on:
   • «найди референсы для X», «подбери рефы под X», «вдохнови меня примерами сайтов в нише X»
@@ -22,7 +22,7 @@ allowed-tools:
 
 # redreference — курирование дизайн-референсов с петлёй вкуса
 
-Та же модель, что `redresearch` и `redloft`: оркестратор **не работает сам**, а гоняет фазы детерминированным Workflow-скриптом, **caller** делает persist + пишет artifacts (Workflow-песочница без FS). Источники = два класса адаптеров; вкус исследуется итеративно через локальную интерактивную страницу и active-learning петлю.
+Та же модель, что `redresearch`: оркестратор **не работает сам**, а гоняет фазы детерминированным Workflow-скриптом, **caller** делает persist + пишет artifacts (Workflow-песочница без FS). Источники = два класса адаптеров; вкус исследуется итеративно через локальную интерактивную страницу и active-learning петлю.
 
 ## Flow
 
@@ -45,7 +45,7 @@ Phase PAGE — build-page.sh → локальная page/index.html (скрин�
 Phase ROUND — приём фидбэка → WAL commit (lib/wal.sh) → пересчёт taste-profile.json →
    query-expansion по понравившимся (tags/colors/attributes) → следующий раунд «ещё похожих»
    ↓ (петля до критерия остановки: user-done / converged / cap 5 / zero-like-streak)
-Phase RENDER → taste-profile.json + reference-likes.md (redloft-совместимо) + курированный captures.jsonl
+Phase RENDER → taste-profile.json + reference-likes.md + курированный captures.jsonl
 ```
 
 ## Запуск
@@ -167,7 +167,7 @@ Round-trip же ловит кириллицу: у Geist, Söhne, Clash Display �
 
 **Stage D петля докручена (smoke 50/50):** `lib/round.sh` (start/next/ingest) — кросс-раунд дедуп через WAL captures-index, кап ROUND_SIZE=12, сквозные глобальные id, якорь-бриф + фильтр бренд-шума (common keywords df≥2) + Are.na query-shortening + пагинация. `lib/dedup-cards.py`.
 
-**Stage E redloft-встройка готова (smoke 55/55):** `lib/export-redloft.{sh,js}` — merge профиля в `visual-taste-profile.json` (обогащает references/anti_references/mood, НЕ затирает tone/palette/typography брифинга) + наполняет `reference-likes.md` (что понравилось + UX/UI + комментарии); backup-before-write + flock + atomic + graceful (0 лайков → TASTE_EMPTY, не трогает) + TASTE_MERGE_FAILED при битом payload.
+**Stage E встройка во внешний оркестратор готова (smoke 55/55):** `lib/export-taste.{sh,js}` — merge профиля в `visual-taste-profile.json` (обогащает references/anti_references/mood, НЕ затирает tone/palette/typography брифинга) + наполняет `reference-likes.md` (что понравилось + UX/UI + комментарии); backup-before-write + flock + atomic + graceful (0 лайков → TASTE_EMPTY, не трогает) + TASTE_MERGE_FAILED при битом payload.
 
 **Stage B доп-адаптеры готовы (smoke 63/63, canary 7/7):** Awwwards + Behance live-verified 2026-06-11, source-balanced rounds (см. выше).
 

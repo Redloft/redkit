@@ -2,7 +2,7 @@
 //
 // «SEO-мозг»: из бизнес-ядра (+research/positioning) строит Keyword Universe →
 // Intent/Content Clusters → структуру сайта → SEO-страницы/блог/FAQ → entities →
-// internal linking map. Семантика ДИКТУЕТ структуру (вход для redloft sitemap).
+// internal linking map. Семантика ДИКТУЕТ структуру (вход для стадии карты сайта у вызывающей стороны).
 //
 // Зеркалит ~/.claude/skills/redresearch/workflow/research.js (scope→hunt→read→
 // synth→judge). Поток: scope → seed → harvest → cluster → structure → judge.
@@ -16,9 +16,9 @@
 //   region       — гео («Москва» / код 213); lang — 'ru' по умолчанию
 //   mode         — 'lite' | 'standard' | 'heavy'
 //   site_type    — landing|corporate|ecommerce|... (из brief в redloft)
-//   brief        — { key_claims:[…] } из redloft briefing (опц.)
-//   research     — { key_claims:[…] } из redloft research-стадии (опц.)
-//   planning     — { key_claims:[…] } ICP/JTBD/USP из redloft planning (опц.)
+//   brief        — { key_claims:[…] } из брифинга вызывающей стороны (опц.)
+//   research     — { key_claims:[…] } из research-стадии вызывающей стороны (опц.)
+//   planning     — { key_claims:[…] } ICP/JTBD/USP из planning-стадии вызывающей стороны (опц.)
 //   available_adapters — [] список живых адаптеров (caller прогнал probe.sh; иначе scoper)
 //   run_id, timestamp, slug, git_rev — correlation/meta
 //
@@ -463,7 +463,7 @@ const structure = await agent(
   `=== INTENT CLUSTERS ===\n${JSON.stringify(intentClusters).slice(0, 4000)}\n` +
   `=== CONTENT CLUSTERS ===\n${JSON.stringify(contentClusters).slice(0, 4000)}\n=== END ===\n` + ctxBlock() +
   `Верни JSON по STRUCTURE_SCHEMA: structure[]${existingSite ? ' (с node_status existing|new)' : ''}, seo_pages[], blog_topics[], faq[], entities[], linking_map[], ` +
-  `key_claims (1-7: ядро/топ-кластеры/интент-микс/предложенная структура — для redloft reviewer и sitemap), body_md (человекочитаемый отчёт без YAML).`,
+  `key_claims (1-7: ядро/топ-кластеры/интент-микс/предложенная структура — для reviewer и стадии карты сайта вызывающей стороны), body_md (человекочитаемый отчёт без YAML).`,
   { label: 'architect', phase: 'Structure', model: modelFor('structure'), schema: STRUCTURE_SCHEMA }
 )
 
@@ -553,7 +553,7 @@ const artifacts = {
 const degraded = !liveAdapters.length || universe.length < MIN_KEYWORDS
 return {
   artifacts,
-  // redloft-стадийный контракт:
+  // стадийный контракт вызывающей стороны:
   artifact_type: 'semantic',
   key_claims: keyClaims.slice(0, 7),
   body_md: bodyMd,

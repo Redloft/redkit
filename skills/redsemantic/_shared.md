@@ -15,7 +15,7 @@
 | `run.log` | log.sh | JSONL | append-only event log (secret-scrubbed) |
 | `keyword_universe.jsonl` | harvest | JSONL | по ключу на строку: `{phrase, freq, source, intent}` |
 | `clusters.json` | cluster | JSON | `intent_clusters[]` + `content_clusters[]` + `orphan_keywords[]` |
-| `structure.json` | structure | JSON | `structure[]` — узлы сайта (вход для redloft sitemap) |
+| `structure.json` | structure | JSON | `structure[]` — узлы сайта (вход для стадии карты сайта у вызывающей стороны) |
 | `content_plan.json` | structure | JSON | `seo_pages[]` + `blog_topics[]` + `faq[]` |
 | `entities.json` | structure | JSON | `entities[]` для schema.org/GEO |
 | `linking_map.json` | structure | JSON | `linking_map[]` внутренняя перелинковка |

@@ -41,12 +41,12 @@ OUT=$(bash ~/.claude/skills/redreference/lib/round.sh next "$RUN_DIR" "$N")
   ```
   (validate → WAL commit → пересчёт вкуса). `STOP=continue` → следующий раунд; иначе стоп.
 
-### Шаг 3 — Render + (опц.) redloft-встройка
+### Шаг 3 — Render + (опц.) встройка во внешний оркестратор
 - Покажи: курированный набор (top liked + UX/UI), сошёлся ли вкус (rounds/confidence), путь. `write_status done completed 0`. Источники с атрибуцией; link-only (Pinterest/Dribbble/Savee) — отдельным списком ссылок.
 - **Секрет-чек:** `bash lib/sanitize.sh scrub < "$RUN_DIR/run.log" | diff - "$RUN_DIR/run.log"` — без расхождений (scrub на записи).
-- **redloft-встройка (Stage E):** когда redreference внутри redloft-пайплайна (или по запросу):
+- **Встройка (Stage E):** когда redreference вызван внутри внешнего site-пайплайна (или по запросу):
   ```bash
-  bash ~/.claude/skills/redreference/lib/export-redloft.sh "$RUN_DIR" \
+  bash ~/.claude/skills/redreference/lib/export-taste.sh "$RUN_DIR" \
     "<project>/brief/visual-taste-profile.json" "<project>/design/reference-likes.md"
   ```
   merge (не затирает брифинг) + backup + flock + atomic; 0 лайков → `TASTE_EMPTY` (не трогает).
