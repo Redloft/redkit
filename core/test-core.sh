@@ -9,6 +9,9 @@ run "strip-secrets" bash "$HERE/strip-secrets.sh" --self-test
 run "checkpoint"    bash "$HERE/checkpoint.sh" --self-test
 run "ledger"        bash "$HERE/ledger.sh" --self-test
 run "validators"    node "$HERE/validators.js" --self-test
+# Гейт публикации проверяем негативным контролем: подложенная утечка в untracked-файле
+# обязана его покраснить (04.09.2026 такой файл не проверялся вообще).
+run "publish-gate"  bash "$HERE/publish-gate.sh" --self-test
 echo
 if [ "$FAIL" -eq 0 ]; then echo "✅ redkit core: ALL self-tests passed"; exit 0
 else echo "❌ redkit core: $FAIL failed"; exit 1; fi

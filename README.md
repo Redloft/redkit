@@ -33,9 +33,18 @@ redkit публичный, но собирается из `~/.claude/skills`, г
 оператора (IP, имена клиентов, почта, домашние пути). Перед любым пушем:
 
 ```bash
-bash core/publish-gate.sh          # всё под git
-bash core/publish-gate.sh --staged # только staged
+bash core/publish-gate.sh           # tracked + untracked (всё, что не в .gitignore)
+bash core/publish-gate.sh --staged  # только staged
+bash core/publish-gate.sh --self-test  # контроль самого гейта
 ```
+
+Область проверки — **tracked и untracked-но-не-ignored** файлы: новый файл, ещё не
+попавший в коммит, — такая же публичная поверхность (один `git add .`). Итоговая
+строка печатает знаменатель по обеим категориям (`чисто (tracked 347, untracked 20)`),
+чтобы «чисто» говорило, что именно проверено.
+
+`--self-test` подкладывает утечку в untracked-файл (в том числе с не-ASCII именем)
+и проверяет, что гейт КРАСНЕЕТ; он же входит в `bash core/test-core.sh`.
 
 Повесить на pre-commit, чтобы не забывать:
 

@@ -16,7 +16,7 @@ CHAT_FILE="${REDLOOP_TG_CHAT_FILE:-$HOME/.claude/.redloop-tg-chat}"   # gitignor
 # ⚠ имена детекторов пишутся ТОЧНО так же, как их печатает detect.sh (через дефис).
 # Рассинхрон конвенций уже стоил трёх немых детекторов: escalate отвергал reason_code,
 # и RETRY-BURN / PREMATURE-EXIT / ASK-STORM физически не могли позвать человека.
-REASONS="STALL LOOP RETRY-BURN DRIFT PREMATURE-EXIT ASK-STORM BUDGET-OVERRUN BLOCKED-EXTERNAL DETECTOR-BROKEN SILENCE BUDGET_EXCEEDED CONTRACT_INVALID FLOOR_BLOCKED RUNNER_DEAD RUN_DONE NO_GO"
+REASONS="STALL LOOP RETRY-BURN DRIFT PREMATURE-EXIT FRESH-CHECK-MISSING RUN-ABANDONED ITERS-MISMATCH POLICY-REJECT ASK-STORM BUDGET-OVERRUN BLOCKED-EXTERNAL DETECTOR-BROKEN CONSTANTS-MISSING SILENCE BUDGET_EXCEEDED CONTRACT_INVALID FLOOR_BLOCKED RUNNER_DEAD RUN_DONE NO_GO"
 
 escalate() {
   local rd="${1:?run_dir}" reason="${2:?reason_code}" needs="${3:?needs_csv}" diag="${4:-}" sugg="${5:-}"
@@ -71,12 +71,18 @@ self_test() {
   grep -q '"event_type":"escalation"' "$rd/events.jsonl"; ok $? "эскалация видна в журнале"
   # ⚠ имена берём ИЗ detect.sh, а не переписываем руками: ровно этот рассинхрон уже оставлял
   # детекторы немыми, и второй раз он случился на BUDGET-OVERRUN/BLOCKED-EXTERNAL.
-  local d; for d in $(grep -o '^  DET_NAME=[A-Z-]*' "$HERE/detect.sh" | sed 's/.*=//' | sort -u); do
+  # ⚠ Сбор ТОЛЬКО по `DET_NAME=` пропускал детекторы, которые эмитятся литералом
+  # (CONSTANTS-MISSING, DETECTOR-BROKEN): страховка против немых детекторов сама их не видела.
+  _detector_names() {
+    { grep -o '^  DET_NAME=[A-Z-]*' "$HERE/detect.sh" | sed 's/.*=//'
+      grep -oE 'detector"?:[[:space:]]*"[A-Z-]+"' "$HERE/detect.sh" | grep -oE '"[A-Z-]+"$' | tr -d '"'
+    } | sort -u; }
+  local d; for d in $(_detector_names); do
     escalate "$rd" "$d" "unblock" >/dev/null 2>&1; ok $? "детектор $d принимается эскалацией"
   done
   # и обратная сверка: каждое имя детектора обязано быть в enum причин
   local missing=""
-  for d in $(grep -o '^  DET_NAME=[A-Z-]*' "$HERE/detect.sh" | sed 's/.*=//' | sort -u) DETECTOR-BROKEN; do
+  for d in $(_detector_names); do
     echo "$REASONS" | grep -qw "$d" || missing="$missing $d"
   done
   [ -z "$missing" ]; ok $? "множества детекторов и причин эскалации совпадают (нет:$missing)"

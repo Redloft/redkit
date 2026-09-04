@@ -8,8 +8,9 @@
 # репозитория. Поэтому ловим ДО пуша.
 #
 # ЗАПУСК:
-#   bash core/publish-gate.sh            # всё, что под git
+#   bash core/publish-gate.sh            # tracked + untracked (не ignored)
 #   bash core/publish-gate.sh --staged   # только staged (для pre-commit)
+#   bash core/publish-gate.sh --self-test # негативный/позитивный контроль самого гейта
 #
 # Коды выхода: 0 — чисто, 1 — найдены приватные данные.
 #
@@ -21,17 +22,105 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# ── --self-test: контроль самого гейта ────────────────────────────────────
+# Проверяем не «есть ли код», а КРАСНЕЕТ ли гейт на подложенной утечке — в том
+# числе в untracked-файле. До 04.09.2026 такой тест зеленел бы вхолостую:
+# untracked-файлы в область проверки не входили, и гейт печатал «чисто».
+# Песочница — отдельный git-репозиторий в mktemp, боевой репо не трогаем.
+if [ "${1:-}" = "--self-test" ]; then
+  GATE="$PWD/core/publish-gate.sh"
+  SB=$(mktemp -d) || exit 1
+  # Вывод прогона держим ВНЕ песочницы: файл внутри неё сам стал бы untracked-файлом
+  # и сдвинул знаменатель, который мы же и проверяем.
+  OUT=$(mktemp) || exit 1
+  trap 'rm -rf "$SB" "$OUT"' EXIT
+  mkdir -p "$SB/core" && cp "$GATE" "$SB/core/publish-gate.sh"
+  git -C "$SB" init -q || exit 1
+  # Копия самого гейта в песочнице — не предмет проверки: держим её вне области
+  # через .gitignore, иначе тест мерил бы собственный исходник.
+  printf 'core/\n' > "$SB/.gitignore"
+  # Строку-утечку собираем ИЗ ЧАСТЕЙ: если написать её литералом, этот публичный
+  # файл сам стал бы находкой боевого прогона гейта.
+  U="/User""s"; WHO="jdoe"
+  st_fail=0
+  # HOME подменяем, чтобы на вердикт песочницы не влияли реальные скиллы оператора.
+  st_run() { ( cd "$SB" && HOME="$SB" bash core/publish-gate.sh ) > "$OUT" 2>&1; echo $?; }
+  st_case() { # st_case <имя> <ожидаемый-код> <ожидаемая-подстрока-или-пусто>
+    rc=$(st_run)
+    if [ "$rc" != "$2" ]; then
+      echo "  ❌ $1: код $rc, ожидался $2"; sed 's/^/      /' "$OUT"; st_fail=1; return
+    fi
+    if [ -n "${3:-}" ] && ! grep -q "$3" "$OUT"; then
+      echo "  ❌ $1: в выводе нет «$3»"; sed 's/^/      /' "$OUT"; st_fail=1; return
+    fi
+    echo "  ✅ $1"
+  }
+
+  # 1. НЕГАТИВНЫЙ КОНТРОЛЬ: домашний путь в untracked-файле — гейт обязан покраснеть.
+  mkdir -p "$SB/skills/x/fixtures"
+  echo "report path: $U/$WHO/work/report.json" > "$SB/skills/x/fixtures/leak.txt"
+  st_case "untracked-утечка ловится" 1 "домашний путь"
+
+  # 2. ПОЗИТИВНЫЙ КОНТРОЛЬ: чистый untracked — зелено, и знаменатель его считает
+  #    (.gitignore + ok.txt = 2; без untracked-области здесь стояло бы 0).
+  rm -f "$SB/skills/x/fixtures/leak.txt"
+  printf 'nothing private here\n' > "$SB/skills/x/fixtures/ok.txt"
+  st_case "чистый untracked не ложно-красный" 0 "untracked 2"
+
+  # 3. Ignored-файлы вне области: .gitignore — граница публичной поверхности.
+  printf 'ignored.txt\n' >> "$SB/.gitignore"
+  echo "$U/$WHO/secret" > "$SB/ignored.txt"
+  st_case "ignored не проверяется" 0 "untracked 2"
+
+  # 4. Регрессия на старый маршрут: утечка в tracked-файле ловится по-прежнему.
+  rm -f "$SB/ignored.txt"
+  echo "$U/$WHO/old" > "$SB/tracked-leak.txt"
+  git -C "$SB" add -f tracked-leak.txt >/dev/null 2>&1
+  git -C "$SB" -c user.email=t@example.invalid -c user.name=t commit -qm x >/dev/null 2>&1
+  st_case "tracked-утечка ловится" 1 "домашний путь"
+
+  # 5. Имя файла с кириллицей: git по умолчанию отдаёт его в \NNN-эскейпах, и такой
+  #    файл раньше выпадал из сканирования, оставаясь в знаменателе.
+  rm -f "$SB/tracked-leak.txt"
+  git -C "$SB" rm -q --cached tracked-leak.txt >/dev/null 2>&1
+  echo "$U/$WHO/rus" > "$SB/ОСТАТОК.md"
+  st_case "не-ASCII имя файла сканируется" 1 "домашний путь"
+
+  echo
+  [ "$st_fail" -eq 0 ] && { echo "publish-gate: self-test OK"; exit 0; }
+  echo "publish-gate: self-test FAILED"; exit 1
+fi
+
 TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 LIST="$TMP/files"
 
+# ОБЛАСТЬ ПРОВЕРКИ. Раньше здесь был только `git ls-files` — и новые, ещё не
+# закоммиченные файлы гейт не смотрел ВООБЩЕ, печатая при этом «чисто»
+# (инцидент 04.09.2026: вендоренные отчёты в skills/redloop/lib/fixtures/reports/
+# с домашним путём оператора). Untracked-но-не-ignored файлы — такая же публичная
+# поверхность: один `git add .` — и они в коммите. Поэтому проверяем обе категории,
+# а в итоговой строке печатаем ЗНАМЕНАТЕЛЬ по каждой: «чисто» обязано говорить,
+# что именно проверено.
 if [ "${1:-}" = "--staged" ]; then
-  git diff --cached --name-only --diff-filter=ACMR > "$LIST"; SCOPE="staged"
+  git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR > "$LIST"; SCOPE="staged"
+  N_TRACKED=$(wc -l < "$LIST" | tr -d ' ')
+  N_UNTRACKED=0
+  DENOM="staged $N_TRACKED"
 else
-  git ls-files > "$LIST"; SCOPE="tracked"
+  SCOPE="tracked+untracked"
+  # core.quotepath=false обязателен: иначе git отдаёт имена с кириллицей в \NNN-эскейпах,
+  # `[ -f "$f" ]` не находит файл и он молча выпадает из сканирования, оставаясь в
+  # знаменателе. Знаменатель, который считает непроверенное, — та же дыра, что и «чисто».
+  git -c core.quotepath=false ls-files > "$TMP/tracked"
+  git -c core.quotepath=false ls-files --others --exclude-standard > "$TMP/untracked"
+  N_TRACKED=$(wc -l < "$TMP/tracked" | tr -d ' ')
+  N_UNTRACKED=$(wc -l < "$TMP/untracked" | tr -d ' ')
+  cat "$TMP/tracked" "$TMP/untracked" > "$LIST"
+  DENOM="tracked $N_TRACKED, untracked $N_UNTRACKED"
 fi
 COUNT=$(wc -l < "$LIST" | tr -d ' ')
-[ "$COUNT" = "0" ] && { echo "publish-gate: нечего проверять ($SCOPE)"; exit 0; }
+[ "$COUNT" = "0" ] && { echo "publish-gate: нечего проверять ($DENOM)"; exit 0; }
 
 fail=0
 ALLOW="core/publish-gate.allow"
@@ -139,9 +228,9 @@ report "публичные IP-адреса" "$TMP/hits"
 
 echo
 if [ "$fail" -ne 0 ]; then
-  echo "publish-gate: НАЙДЕНЫ ПРИВАТНЫЕ ДАННЫЕ — публиковать нельзя."
+  echo "publish-gate: НАЙДЕНЫ ПРИВАТНЫЕ ДАННЫЕ — публиковать нельзя ($DENOM)."
   echo "Обобщи строку или добавь путь в .gitignore."
   echo "Если уже попало в историю — force-push не поможет, нужно пересоздание репозитория."
   exit 1
 fi
-echo "publish-gate: чисто ($SCOPE, $COUNT файлов)."
+echo "publish-gate: чисто ($DENOM)."

@@ -148,8 +148,12 @@ self_test() {
   local T; T="$(mktemp -d)"; local fail=0
   ok(){ if [ "$1" -eq 0 ]; then :; else echo "  ✗ $2"; fail=1; fi; }
   export REDLOOP_INDEX="$T/index.jsonl" REDLOOP_WATCH_DRYRUN=1
+  # фикстуры здесь — намеренно больные прогоны (тишина, пустые итерации). Требование
+  # внешнего состояния проверяется в events.sh; тут оно только помешало бы собрать журнал.
+  export REDLOOP_STATE_FILES_ENFORCE=0
   export REDLOOP_STATS_DIR="$T/stats"; mkdir -p "$REDLOOP_STATS_DIR"
   local rd="$T/runs/silent"; mkdir -p "$rd"
+  echo '{"state_files":[],"human_acceptance":[]}' > "$rd/contract.json"
   bash "$HERE/events.sh" append "$rd" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null 2>&1
   bash "$HERE/events.sh" append "$rd" iter_done '{"task_id":"t","files_changed":1,"checkboxes_done":1}' --iter 1 --of 9 >/dev/null 2>&1
   python3 - "$rd/events.jsonl" <<'PYY'
@@ -169,6 +173,7 @@ PYY
   out="$(watch_once)"; echo "$out" | grep -q "доставлено 0"; ok $? "повторный обход не дублирует доставленную тревогу"
   # живой проект: журнал молчит, но файлы свежие → тревогу подавляем и считаем
   local rl="$T/proj/.redloop/runs/live"; mkdir -p "$rl"
+  echo '{"state_files":[],"human_acceptance":[]}' > "$rl/contract.json"
   bash "$HERE/events.sh" append "$rl" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null 2>&1
   bash "$HERE/events.sh" append "$rl" iter_done '{"task_id":"t","files_changed":1,"checkboxes_done":1}' --iter 1 --of 9 >/dev/null 2>&1
   python3 - "$rl/events.jsonl" <<'PYY'
@@ -183,8 +188,25 @@ PYY
   echo "$out" | grep -q "подавлено (проект жив) 1"; ok $? "живой проект: SILENCE подавлен, а не выдан за смерть"
   jq -e -s 'any(.[]; .detector=="SILENCE" and (.suppressed_count // 0) > 0 and .delivered==false)' "$rl/alerts.jsonl" >/dev/null
   ok $? "подавление записано счётчиком и не выдано за доставку"
+  # ── круг 7: честно сдавшийся прогон обязан ДОЙТИ до владельца ────────────
+  # Регрессия круга 6: лечили ложную тревогу на честной сдаче — и вылечили доставку.
+  # SILENCE гасится наличием run_done, FRESH-CHECK-MISSING снят по outcome, авто-нотификация
+  # выключена. Если RUN-ABANDONED тоже тихий, упавший прогон не доходит НИКАК.
+  # Тест пересекает порог: смотрим не «находка есть», а «тревога ДОСТАВЛЕНА».
+  local rab="$T/runs/abandoned"; mkdir -p "$rab"
+  echo '{"state_files":[],"human_acceptance":[]}' > "$rab/contract.json"
+  bash "$HERE/events.sh" append "$rab" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null 2>&1
+  bash "$HERE/events.sh" append "$rab" iter_done '{"task_id":"t","files_changed":1,"checkboxes_done":1}' --iter 1 --of 9 >/dev/null 2>&1
+  bash "$HERE/events.sh" append "$rab" run_done '{"verdict":"нет токена","iters":1,"interventions":0,"outcome":"blocked"}' >/dev/null 2>&1
+  rm -f "$REDLOOP_STATS_DIR/detectors.json"   # тихость берётся из constants.json, не из stats
+  out="$(watch_once)"
+  echo "$out" | grep -q "доставлено 1"; ok $? "круг7: честный неуспех ДОСТАВЛЕН владельцу (не только записан)"
+  jq -e -s 'any(.[]; .detector=="RUN-ABANDONED" and .shadow==false and .delivered==true)' "$rab/alerts.jsonl" >/dev/null
+  ok $? "круг7: RUN-ABANDONED не тихий и помечен доставленным"
+
   # тихий детектор ФИКСИРУЕТСЯ (иначе не накопит эмпирику и не выйдет из shadow по числам)
   local rs="$T/runs/shadowed"; mkdir -p "$rs"
+  echo '{"state_files":[],"human_acceptance":[]}' > "$rs/contract.json"
   echo '{}' > "$REDLOOP_STATS_DIR/detectors.json"     # всё в тихом режиме
   bash "$HERE/events.sh" append "$rs" run_start '{"runner":"session","contract_sha":"a"}' >/dev/null 2>&1
   local z; for z in 1 2 3; do bash "$HERE/events.sh" append "$rs" iter_done '{"task_id":"t","files_changed":0,"checkboxes_done":0}' --iter $z --of 9 >/dev/null 2>&1; done
